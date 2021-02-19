@@ -47,6 +47,7 @@ parser.add_argument("--repeat-video", type=int, help="When set to 1 and a video 
 parser.add_argument("--dump-points", type=str, help="When set to a filename, the current face 3D points are made symmetric and dumped to the given file when quitting the visualization with the \"q\" key", default="")
 parser.add_argument("--benchmark", type=int, help="When set to 1, the different tracking models are benchmarked, starting with the best and ending with the fastest and with gaze tracking disabled for models with negative IDs", default=0)
 parser.add_argument("--mirror", action="store_true", required=False, help="Mirror the camera image")
+parser.add_argument("--limit-fps", type=int, help="Limit app's max frame rate")
 if os.name == 'nt':
     parser.add_argument("--use-dshowcapture", type=int, help="When set to 1, libdshowcapture will be used for video input instead of OpenCV", default=1)
     parser.add_argument("--blackmagic-options", type=str, help="When set, this additional option string is passed to the blackmagic capture library", default=None)
@@ -207,6 +208,8 @@ try:
     failures = 0
     source_name = input_reader.name
     while repeat or input_reader.is_open():
+        time_ns = time.time_ns()
+
         if not input_reader.is_open() or need_reinit == 1:
             input_reader = InputReader(args.capture, args.raw_rgb, args.width, args.height, fps, use_dshowcapture=use_dshowcapture_flag, dcap=dcap, mirror=args.mirror)
             if input_reader.name != source_name:
@@ -448,6 +451,12 @@ try:
                 time.sleep(sleep_time)
             duration = time.perf_counter() - frame_time
         frame_time = time.perf_counter()
+
+        if args.limit_fps:
+            dt = time.time_ns() - time_ns
+            target_ms = 1000 / args.limit_fps
+            wait = max(0, (target_ms * 1000000 - dt) / 1000000)
+            time.sleep(wait / 1000)
 except KeyboardInterrupt:
     if args.silent == 0:
         print("Quitting")
