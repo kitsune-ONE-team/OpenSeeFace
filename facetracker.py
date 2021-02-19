@@ -46,6 +46,7 @@ parser.add_argument("--face-id-offset", type=int, help="When set, this offset is
 parser.add_argument("--repeat-video", type=int, help="When set to 1 and a video file was specified with -c, the tracker will loop the video until interrupted", default=0)
 parser.add_argument("--dump-points", type=str, help="When set to a filename, the current face 3D points are made symmetric and dumped to the given file when quitting the visualization with the \"q\" key", default="")
 parser.add_argument("--benchmark", type=int, help="When set to 1, the different tracking models are benchmarked, starting with the best and ending with the fastest and with gaze tracking disabled for models with negative IDs", default=0)
+parser.add_argument("--mirror", action="store_true", required=False, help="Mirror the camera image")
 if os.name == 'nt':
     parser.add_argument("--use-dshowcapture", type=int, help="When set to 1, libdshowcapture will be used for video input instead of OpenCV", default=1)
     parser.add_argument("--blackmagic-options", type=str, help="When set, this additional option string is passed to the blackmagic capture library", default=None)
@@ -159,11 +160,11 @@ if os.name == 'nt':
     fps = args.fps
     dcap = args.dcap
     use_dshowcapture_flag = True if args.use_dshowcapture == 1 else False
-    input_reader = InputReader(args.capture, args.raw_rgb, args.width, args.height, fps, use_dshowcapture=use_dshowcapture_flag, dcap=dcap)
+    input_reader = InputReader(args.capture, args.raw_rgb, args.width, args.height, fps, use_dshowcapture=use_dshowcapture_flag, dcap=dcap, mirror=mirror)
     if args.dcap == -1 and type(input_reader) == DShowCaptureReader:
         fps = min(fps, input_reader.device.get_fps())
 else:
-    input_reader = InputReader(args.capture, args.raw_rgb, args.width, args.height, fps, use_dshowcapture=use_dshowcapture_flag)
+    input_reader = InputReader(args.capture, args.raw_rgb, args.width, args.height, fps, use_dshowcapture=use_dshowcapture_flag, mirror=args.mirror)
 if type(input_reader.reader) == VideoReader:
     fps = 0
 
@@ -207,7 +208,7 @@ try:
     source_name = input_reader.name
     while repeat or input_reader.is_open():
         if not input_reader.is_open() or need_reinit == 1:
-            input_reader = InputReader(args.capture, args.raw_rgb, args.width, args.height, fps, use_dshowcapture=use_dshowcapture_flag, dcap=dcap)
+            input_reader = InputReader(args.capture, args.raw_rgb, args.width, args.height, fps, use_dshowcapture=use_dshowcapture_flag, dcap=dcap, mirror=args.mirror)
             if input_reader.name != source_name:
                 print(f"Failed to reinitialize camera and got {input_reader.name} instead of {source_name}.")
                 sys.exit(1)
