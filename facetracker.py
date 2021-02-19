@@ -48,6 +48,7 @@ parser.add_argument("--dump-points", type=str, help="When set to a filename, the
 parser.add_argument("--benchmark", type=int, help="When set to 1, the different tracking models are benchmarked, starting with the best and ending with the fastest and with gaze tracking disabled for models with negative IDs", default=0)
 parser.add_argument("--mirror", action="store_true", required=False, help="Mirror the camera image")
 parser.add_argument("--limit-fps", type=int, help="Limit app's max frame rate")
+parser.add_argument("--protocol", type=int, help="Protocol version to use", default=1)
 if os.name == 'nt':
     parser.add_argument("--use-dshowcapture", type=int, help="When set to 1, libdshowcapture will be used for video input instead of OpenCV", default=1)
     parser.add_argument("--blackmagic-options", type=str, help="When set, this additional option string is passed to the blackmagic capture library", default=None)
@@ -296,6 +297,8 @@ try:
                 packet.extend(bytearray(struct.pack("f", f.translation[2])))
                 if not log is None:
                     log.write(f"{frame_count},{now},{width},{height},{fps},{face_num},{f.id},{f.eye_blink[0]},{f.eye_blink[1]},{f.conf},{f.success},{f.pnp_error},{f.quaternion[0]},{f.quaternion[1]},{f.quaternion[2]},{f.quaternion[3]},{f.euler[0]},{f.euler[1]},{f.euler[2]},{f.rotation[0]},{f.rotation[1]},{f.rotation[2]},{f.translation[0]},{f.translation[1]},{f.translation[2]}")
+                if args.protocol >= 2:
+                    packet.extend(bytearray(struct.pack("B", len(f.lms))))
                 for (x,y,c) in f.lms:
                     packet.extend(bytearray(struct.pack("f", c)))
                 if args.visualize > 1:
@@ -349,6 +352,8 @@ try:
                         x -= 1
                         if not (x < 0 or y < 0 or x >= height or y >= width):
                             frame[int(x), int(y)] = (0, 255, 255)
+                if args.protocol >= 2:
+                    packet.extend(bytearray(struct.pack("B", len(f.pts_3d))))
                 for (x,y,z) in f.pts_3d:
                     packet.extend(bytearray(struct.pack("f", x)))
                     packet.extend(bytearray(struct.pack("f", -y)))
