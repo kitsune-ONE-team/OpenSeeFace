@@ -1,9 +1,18 @@
+"""
+To run it from installed WHL:
+$ facetracker
+
+To run it from source tree:
+$ python -m openseeface.facetracker
+"""
+
 import copy
 import os
 import sys
 import argparse
 import traceback
 import gc
+
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("-i", "--ip", help="Set IP address for sending tracking data", default="127.0.0.1")
@@ -77,7 +86,7 @@ sys.stdout = OutputLog(output_logfile, sys.stdout)
 sys.stderr = OutputLog(output_logfile, sys.stderr)
 
 if os.name == 'nt':
-    import dshowcapture
+    from . import dshowcapture
     if args.blackmagic == 1:
         dshowcapture.set_bm_enabled(True)
     if not args.blackmagic_options is None:
@@ -124,14 +133,17 @@ if os.name == 'nt' and (args.list_cameras > 0 or not args.list_dcaps is None):
     cap.destroy_capture()
     sys.exit(0)
 
+
 import numpy as np
 import time
 import cv2
 import socket
 import struct
 import json
-from input_reader import InputReader, VideoReader, DShowCaptureReader, try_int
-from tracker import Tracker, get_model_base_path
+
+from .input_reader import InputReader, VideoReader, DShowCaptureReader, try_int
+from .tracker import Tracker, get_model_base_path
+
 
 if args.benchmark > 0:
     model_base_path = get_model_base_path(args.model_dir)

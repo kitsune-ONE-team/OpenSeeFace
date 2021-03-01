@@ -4,6 +4,7 @@ import numpy as np
 import sys
 import textwrap
 
+
 def get_bound_method_class(m):
     """Return the class for a bound method.
 

@@ -3,11 +3,13 @@ import sys
 import os
 import cv2
 import numpy as np
-import escapi
-import dshowcapture
 import time
 import traceback
 import gc
+
+from . import escapi
+from . import dshowcapture
+
 
 class VideoReader():
     def __init__(self, capture, camera=False, mirror=False):

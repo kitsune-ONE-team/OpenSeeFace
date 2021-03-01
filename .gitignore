@@ -6,3 +6,7 @@ Samples/*
 *.7z
 CSharp/*
 VSeeFace/*
+__pycache__/
+/build/
+/dist/
+/openseeface.egg-info/
