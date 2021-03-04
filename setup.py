@@ -42,7 +42,7 @@ if __name__ == "__main__":
         },
         entry_points={
             'console_scripts': (
-                'facetracker=openseeface.__main__:main',
+                'facetracker=openseeface.facetracker:main',
             ),
         },
     )
