@@ -71,11 +71,19 @@ class Facetracker(object):
         parser.add_argument("--mirror", action="store_true", required=False, help="Mirror the camera image")
         parser.add_argument("--limit-fps", type=int, help="Limit app's max frame rate")
         parser.add_argument("--protocol", type=int, help="Protocol version to use", default=1)
+        parser.add_argument("--write-pid", type=str, help="Write process ID to file", required=False)
         if os.name == 'nt':
             parser.add_argument("--use-dshowcapture", type=int, help="When set to 1, libdshowcapture will be used for video input instead of OpenCV", default=1)
             parser.add_argument("--blackmagic-options", type=str, help="When set, this additional option string is passed to the blackmagic capture library", default=None)
             parser.add_argument("--priority", type=int, help="When set, the process priority will be changed", default=None, choices=[0, 1, 2, 3, 4, 5])
         args = parser.parse_args()
+
+        if args.write_pid:
+            if os.path.exists(args.write_pid):
+                os.remove(args.write_pid)
+
+            with open(args.write_pid, 'w') as f:
+                f.write(str(os.getpid()))
 
         os.environ["OMP_NUM_THREADS"] = str(args.max_threads)
 
