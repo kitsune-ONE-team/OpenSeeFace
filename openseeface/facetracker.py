@@ -329,61 +329,67 @@ class Facetracker(object):
                     packet.extend(bytearray(struct.pack("f", f.translation[2])))
                     if not log is None:
                         log.write(f"{frame_count},{now},{width},{height},{fps},{face_num},{f.id},{f.eye_blink[0]},{f.eye_blink[1]},{f.conf},{f.success},{f.pnp_error},{f.quaternion[0]},{f.quaternion[1]},{f.quaternion[2]},{f.quaternion[3]},{f.euler[0]},{f.euler[1]},{f.euler[2]},{f.rotation[0]},{f.rotation[1]},{f.rotation[2]},{f.translation[0]},{f.translation[1]},{f.translation[2]}")
-                    if args.protocol >= 2:
+
+                    if args.protocol == 2:
                         packet.extend(bytearray(struct.pack("B", len(f.lms))))
-                    for (x,y,c) in f.lms:
-                        packet.extend(bytearray(struct.pack("f", c)))
+                    if args.protocol <= 2:
+                        for (x,y,c) in f.lms:
+                            packet.extend(bytearray(struct.pack("f", c)))
+
                     if args.visualize > 1:
                         frame = cv2.putText(frame, str(f.id), (int(f.bbox[0]), int(f.bbox[1])), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255,0,255))
                     if args.visualize > 2:
                         frame = cv2.putText(frame, f"{f.conf:.4f}", (int(f.bbox[0] + 18), int(f.bbox[1] - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255))
-                    for pt_num, (x,y,c) in enumerate(f.lms):
-                        packet.extend(bytearray(struct.pack("f", y)))
-                        packet.extend(bytearray(struct.pack("f", x)))
-                        if not log is None:
-                            log.write(f",{y},{x},{c}")
-                        if pt_num == 66 and (f.eye_blink[0] < 0.30 or c < 0.30):
-                            continue
-                        if pt_num == 67 and (f.eye_blink[1] < 0.30 or c < 0.30):
-                            continue
-                        x = int(x + 0.5)
-                        y = int(y + 0.5)
-                        if args.visualize != 0 or not out is None:
-                            if args.visualize > 3:
-                                frame = cv2.putText(frame, str(pt_num), (int(y), int(x)), cv2.FONT_HERSHEY_SIMPLEX, 0.25, (255,255,0))
-                            color = (0, 255, 0)
-                            if pt_num >= 66:
-                                color = (255, 255, 0)
-                            if not (x < 0 or y < 0 or x >= height or y >= width):
-                                frame[int(x), int(y)] = color
-                            x += 1
-                            if not (x < 0 or y < 0 or x >= height or y >= width):
-                                frame[int(x), int(y)] = color
-                            y += 1
-                            if not (x < 0 or y < 0 or x >= height or y >= width):
-                                frame[int(x), int(y)] = color
-                            x -= 1
-                            if not (x < 0 or y < 0 or x >= height or y >= width):
-                                frame[int(x), int(y)] = color
-                    if args.pnp_points != 0 and (args.visualize != 0 or not out is None) and f.rotation is not None:
-                        if args.pnp_points > 1:
-                            projected = cv2.projectPoints(f.face_3d[0:66], f.rotation, f.translation, tracker.camera, tracker.dist_coeffs)
-                        else:
-                            projected = cv2.projectPoints(f.contour, f.rotation, f.translation, tracker.camera, tracker.dist_coeffs)
-                        for [(x,y)] in projected[0]:
+
+                    if args.protocol <= 2:
+                        for pt_num, (x,y,c) in enumerate(f.lms):
+                            packet.extend(bytearray(struct.pack("f", y)))
+                            packet.extend(bytearray(struct.pack("f", x)))
+                            if not log is None:
+                                log.write(f",{y},{x},{c}")
+                            if pt_num == 66 and (f.eye_blink[0] < 0.30 or c < 0.30):
+                                continue
+                            if pt_num == 67 and (f.eye_blink[1] < 0.30 or c < 0.30):
+                                continue
                             x = int(x + 0.5)
                             y = int(y + 0.5)
-                            if not (x < 0 or y < 0 or x >= height or y >= width):
-                                frame[int(x), int(y)] = (0, 255, 255)
-                            x += 1
-                            if not (x < 0 or y < 0 or x >= height or y >= width):
-                                frame[int(x), int(y)] = (0, 255, 255)
-                            y += 1
-                            if not (x < 0 or y < 0 or x >= height or y >= width):
-                                frame[int(x), int(y)] = (0, 255, 255)
-                            x -= 1
-                            if not (x < 0 or y < 0 or x >= height or y >= width):
-                                frame[int(x), int(y)] = (0, 255, 255)
+                            if args.visualize != 0 or not out is None:
+                                if args.visualize > 3:
+                                    frame = cv2.putText(frame, str(pt_num), (int(y), int(x)), cv2.FONT_HERSHEY_SIMPLEX, 0.25, (255,255,0))
+                                color = (0, 255, 0)
+                                if pt_num >= 66:
+                                    color = (255, 255, 0)
+                                if not (x < 0 or y < 0 or x >= height or y >= width):
+                                    frame[int(x), int(y)] = color
+                                x += 1
+                                if not (x < 0 or y < 0 or x >= height or y >= width):
+                                    frame[int(x), int(y)] = color
+                                y += 1
+                                if not (x < 0 or y < 0 or x >= height or y >= width):
+                                    frame[int(x), int(y)] = color
+                                x -= 1
+                                if not (x < 0 or y < 0 or x >= height or y >= width):
+                                    frame[int(x), int(y)] = color
+                        if args.pnp_points != 0 and (args.visualize != 0 or not out is None) and f.rotation is not None:
+                            if args.pnp_points > 1:
+                                projected = cv2.projectPoints(f.face_3d[0:66], f.rotation, f.translation, tracker.camera, tracker.dist_coeffs)
+                            else:
+                                projected = cv2.projectPoints(f.contour, f.rotation, f.translation, tracker.camera, tracker.dist_coeffs)
+                            for [(x,y)] in projected[0]:
+                                x = int(x + 0.5)
+                                y = int(y + 0.5)
+                                if not (x < 0 or y < 0 or x >= height or y >= width):
+                                    frame[int(x), int(y)] = (0, 255, 255)
+                                x += 1
+                                if not (x < 0 or y < 0 or x >= height or y >= width):
+                                    frame[int(x), int(y)] = (0, 255, 255)
+                                y += 1
+                                if not (x < 0 or y < 0 or x >= height or y >= width):
+                                    frame[int(x), int(y)] = (0, 255, 255)
+                                x -= 1
+                                if not (x < 0 or y < 0 or x >= height or y >= width):
+                                    frame[int(x), int(y)] = (0, 255, 255)
+
                     if args.protocol >= 2:
                         packet.extend(bytearray(struct.pack("B", len(f.pts_3d))))
                     for (x,y,z) in f.pts_3d:
@@ -405,6 +411,10 @@ class Facetracker(object):
                         log.flush()
 
                 if detected and len(faces) < 40:
+                    if args.protocol >= 3:
+                        checksum = sum(packet) & 0xffff  # to uint16
+                        header = bytearray(struct.pack('H', checksum))
+                        packet = header + packet
                     sock.sendto(packet, (target_ip, target_port))
 
                 if not out is None:
