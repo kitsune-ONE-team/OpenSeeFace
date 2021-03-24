@@ -182,8 +182,8 @@ class Facetracker(object):
                 print(1. / (total / 100.))
             sys.exit(0)
 
-        target_ip = args.ip
-        target_port = args.port
+        socket_af, socket_sk, x, y, socket_addr = socket.getaddrinfo(
+            args.ip, args.port, socket.AF_INET, socket.SOCK_DGRAM)[0]
 
         if args.faces >= 40:
             print("Transmission of tracking data over network is not supported with 40 or more faces.")
@@ -282,7 +282,7 @@ class Facetracker(object):
             if first:
                 first = False
                 height, width, channels = frame.shape
-                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock = socket.socket(socket_af, socket_sk)
                 tracker = Tracker(width, height, threshold=args.threshold, max_threads=args.max_threads, max_faces=args.faces, discard_after=args.discard_after, scan_every=args.scan_every, silent=False if args.silent == 0 else True, model_type=args.model, model_dir=args.model_dir, no_gaze=False if args.gaze_tracking != 0 and args.model != -1 else True, detection_threshold=args.detection_threshold, use_retinaface=args.scan_retinaface, max_feature_updates=args.max_feature_updates, static_model=True if args.no_3d_adapt == 1 else False, try_hard=args.try_hard == 1)
                 if not args.video_out is None:
                     out = cv2.VideoWriter(args.video_out, cv2.VideoWriter_fourcc('F','F','V','1'), args.video_fps, (width * args.video_scale, height * args.video_scale))
@@ -415,7 +415,7 @@ class Facetracker(object):
                         checksum = sum(packet) & 0xffff  # to uint16
                         header = bytearray(struct.pack('H', checksum))
                         packet = header + packet
-                    sock.sendto(packet, (target_ip, target_port))
+                    sock.sendto(packet, socket_addr)
 
                 if not out is None:
                     video_frame = frame
