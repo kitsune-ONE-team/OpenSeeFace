@@ -76,6 +76,9 @@ class Facetracker(object):
         parser.add_argument("--limit-fps", type=int, help="Limit app's max frame rate")
         parser.add_argument("--protocol", type=int, help="Protocol version to use", default=1)
         parser.add_argument("--write-pid", type=str, help="Write process ID to file", required=False)
+        parser.add_argument("--hands", type=int, help="Set the maximum number of hands", default=0)
+        parser.add_argument("--no-landmarks", action="store_true", required=False, help="Don't send face landmarks")
+        parser.add_argument("--no-points", action="store_true", required=False, help="Don't send face points")
 
         if os.name == 'nt':
             parser.add_argument("--use-dshowcapture", type=int, help="When set to 1, libdshowcapture will be used for video input instead of OpenCV", default=1)
@@ -191,6 +194,8 @@ class Facetracker(object):
             cap.destroy_capture()
             sys.exit(0)
 
+        if self._args.hands > 0:
+            import mediapipe
 
         import numpy as np
         import time
@@ -319,6 +324,7 @@ class Facetracker(object):
             try:
                 inference_start = time.perf_counter()
                 faces = tracker.predict(frame)
+
                 if len(faces) > 0:
                     inference_time = (time.perf_counter() - inference_start)
                     total_tracking_time += inference_time
@@ -326,6 +332,14 @@ class Facetracker(object):
                     tracking_frames += 1
                 packet = bytearray()
                 detected = False
+
+                ###############################################################
+                # FACES
+                ###############################################################
+
+                if self._args.protocol >= 2:
+                    packet.extend(bytearray(struct.pack("B", len(faces))))
+
                 for face_num, f in enumerate(faces):
                     f = copy.copy(f)
                     f.id += self._args.face_id_offset
@@ -338,6 +352,11 @@ class Facetracker(object):
                     detected = True
                     if not f.success:
                         pts_3d = np.zeros((70, 3), np.float32)
+
+                    ###########################################################
+                    # FACE DATA
+                    ###########################################################
+
                     packet.extend(bytearray(struct.pack("d", now)))
                     packet.extend(bytearray(struct.pack("i", f.id)))
                     packet.extend(bytearray(struct.pack("f", width)))
@@ -359,10 +378,19 @@ class Facetracker(object):
                     if not log is None:
                         log.write(f"{frame_count},{now},{width},{height},{fps},{face_num},{f.id},{f.eye_blink[0]},{f.eye_blink[1]},{f.conf},{f.success},{f.pnp_error},{f.quaternion[0]},{f.quaternion[1]},{f.quaternion[2]},{f.quaternion[3]},{f.euler[0]},{f.euler[1]},{f.euler[2]},{f.rotation[0]},{f.rotation[1]},{f.rotation[2]},{f.translation[0]},{f.translation[1]},{f.translation[2]}")
 
-                    if self._args.protocol == 2:
-                        packet.extend(bytearray(struct.pack("B", len(f.lms))))
-                    if self._args.protocol <= 2:
-                        for (x,y,c) in f.lms:
+                    ###########################################################
+                    # LANDMARKS
+                    ###########################################################
+
+                    if self._args.protocol >= 2:
+                        if not self._args.no_landmarks:
+                            count = len(f.lms)
+                        else:
+                            count = 0
+                        packet.extend(bytearray(struct.pack("B", count)))
+
+                    if not self._args.no_landmarks:
+                        for (x, y, c) in f.lms:
                             packet.extend(bytearray(struct.pack("f", c)))
 
                     if self._args.visualize > 1:
@@ -370,8 +398,8 @@ class Facetracker(object):
                     if self._args.visualize > 2:
                         frame = cv2.putText(frame, f"{f.conf:.4f}", (int(f.bbox[0] + 18), int(f.bbox[1] - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255))
 
-                    if self._args.protocol <= 2:
-                        for pt_num, (x,y,c) in enumerate(f.lms):
+                    if not self._args.no_landmarks:
+                        for pt_num, (x, y, c) in enumerate(f.lms):
                             packet.extend(bytearray(struct.pack("f", y)))
                             packet.extend(bytearray(struct.pack("f", x)))
                             if not log is None:
@@ -384,9 +412,9 @@ class Facetracker(object):
                                 if self._args.visualize > 3:
                                     frame = cv2.putText(frame, str(pt_num), (int(y), int(x)), cv2.FONT_HERSHEY_SIMPLEX, 0.25, (255,255,0))
                                 if pt_num >= 66:
-                                    color = (255, 255, 0)
+                                    color = const.COLOR_RED
                                 else:
-                                    color = (0, 255, 0)
+                                    color = const.COLOR_GREEN
                                 self._set_pixel(frame, x, y, color)
 
                         if self._args.pnp_points != 0 and (self._args.visualize != 0 or not out is None) and f.rotation is not None:
@@ -394,17 +422,32 @@ class Facetracker(object):
                                 projected = cv2.projectPoints(f.face_3d[0:66], f.rotation, f.translation, tracker.camera, tracker.dist_coeffs)
                             else:
                                 projected = cv2.projectPoints(f.contour, f.rotation, f.translation, tracker.camera, tracker.dist_coeffs)
-                            for [(x,y)] in projected[0]:
-                                self._set_pixel(frame, x, y, color)
+                            for [(x, y)] in projected[0]:
+                                self._set_pixel(frame, x, y, const.COLOR_YELLOW)
+
+                    ###########################################################
+                    # POINTS
+                    ###########################################################
 
                     if self._args.protocol >= 2:
-                        packet.extend(bytearray(struct.pack("B", len(f.pts_3d))))
-                    for (x,y,z) in f.pts_3d:
-                        packet.extend(bytearray(struct.pack("f", x)))
-                        packet.extend(bytearray(struct.pack("f", -y)))
-                        packet.extend(bytearray(struct.pack("f", -z)))
-                        if not log is None:
-                            log.write(f",{x},{-y},{-z}")
+                        if not self._args.no_points:
+                            count = len(f.pts_3d)
+                        else:
+                            count = 0
+                        packet.extend(bytearray(struct.pack("B", count)))
+
+                    if not self._args.no_points:
+                        for (x, y, z) in f.pts_3d:
+                            packet.extend(bytearray(struct.pack("f", x)))
+                            packet.extend(bytearray(struct.pack("f", -y)))
+                            packet.extend(bytearray(struct.pack("f", -z)))
+                            if not log is None:
+                                log.write(f",{x},{-y},{-z}")
+
+                    ###########################################################
+                    # FEATURES
+                    ###########################################################
+
                     if f.current_features is None:
                         f.current_features = {}
                     for feature in const.FEATURES:
@@ -417,8 +460,49 @@ class Facetracker(object):
                         log.write("\r\n")
                         log.flush()
 
+                ###############################################################
+                # HANDS
+                ###############################################################
+
+                if self._args.protocol >= 2:  # hands for protocol v2+ only
+                    hand_landmarks = []
+
+                    if self._args.hands > 0:
+                        with mediapipe.solutions.hands.Hands(
+                                min_detection_confidence=0.5,
+                                min_tracking_confidence=0.5) as mp_solver:
+
+                            mp_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                            mp_solution = mp_solver.process(mp_frame)
+                            if mp_solution.multi_handedness and mp_solution.multi_hand_landmarks:
+                                for i, (hand, landmarks) in enumerate(zip(
+                                        mp_solution.multi_handedness,
+                                        mp_solution.multi_hand_landmarks)):
+                                    c = hand.classification[0]
+                                    hand_landmarks.append((c, []))
+
+                                    for j, landmark in enumerate(landmarks.landmark):
+                                        hand_landmarks[-1][1].append(landmark)
+                                        self._set_pixel(
+                                            frame,
+                                            landmark.y * height,
+                                            landmark.x * width,
+                                            const.COLOR_CYAN)
+
+                                    if i >= self._args.hands - 1:
+                                        break
+
+                    packet.extend(bytearray(struct.pack("B", len(hand_landmarks))))
+                    for hand, landmarks in hand_landmarks:
+                        packet.extend(bytearray(struct.pack("B", 1 if c.label == 'Left' else 0)))
+                        packet.extend(bytearray(struct.pack("B", len(landmarks))))
+                        for landmark in landmarks:
+                            packet.extend(bytearray(struct.pack("f", landmark.x)))
+                            packet.extend(bytearray(struct.pack("f", landmark.y)))
+                            packet.extend(bytearray(struct.pack("f", landmark.z)))
+
                 if detected and len(faces) < 40:
-                    if self._args.protocol >= 3:
+                    if self._args.protocol >= 2:
                         checksum = sum(packet) & 0xffff  # to uint16
                         header = bytearray(struct.pack('H', checksum))
                         packet = header + packet

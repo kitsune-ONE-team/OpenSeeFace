@@ -1,3 +1,8 @@
+COLOR_RED = (0, 0, 255)
+COLOR_GREEN = (0, 255, 0)
+COLOR_YELLOW = (0, 255, 255)
+COLOR_CYAN = (255, 255, 0)
+
 POINTS_PAIRS = (
     (0, 16),
     (1, 15),
