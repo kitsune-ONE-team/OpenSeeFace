@@ -18,6 +18,7 @@ import traceback
 class Facetracker(object):
     def __init__(self):
         self._is_running = True
+        self._args = self._parse_args()
 
         signal.signal(signal.SIGHUP, self._handle_signal)  # reload
         signal.signal(signal.SIGTERM, self._handle_signal)  # kill
@@ -103,17 +104,21 @@ class Facetracker(object):
 
         log.write('\r\n')
 
+    def _set_pixel(self, frame, x, y, color):
+        height, width, channels = frame.shape
+
+        if (0 <= x < height) and (0 <= y < width):
+            frame[int(x), int(y)] = color
+
     def run(self):
-        args = self._parse_args()
+        if self._args.write_pid:
+            if os.path.exists(self._args.write_pid):
+                os.remove(self._args.write_pid)
 
-        if args.write_pid:
-            if os.path.exists(args.write_pid):
-                os.remove(args.write_pid)
-
-            with open(args.write_pid, 'w') as f:
+            with open(self._args.write_pid, 'w') as f:
                 f.write(str(os.getpid()))
 
-        os.environ["OMP_NUM_THREADS"] = str(args.max_threads)
+        os.environ["OMP_NUM_THREADS"] = str(self._args.max_threads)
 
         class OutputLog(object):
             def __init__(self, fh, output):
@@ -129,36 +134,36 @@ class Facetracker(object):
                     self.fh.flush()
                 self.output.flush()
         output_logfile = None
-        if args.log_output != "":
-            output_logfile = open(args.log_output, "w")
+        if self._args.log_output != "":
+            output_logfile = open(self._args.log_output, "w")
         sys.stdout = OutputLog(output_logfile, sys.stdout)
         sys.stderr = OutputLog(output_logfile, sys.stderr)
 
         if os.name == 'nt':
             from . import dshowcapture
-            if args.blackmagic == 1:
+            if self._args.blackmagic == 1:
                 dshowcapture.set_bm_enabled(True)
-            if not args.blackmagic_options is None:
-                dshowcapture.set_options(args.blackmagic_options)
-            if not args.priority is None:
+            if not self._args.blackmagic_options is None:
+                dshowcapture.set_options(self._args.blackmagic_options)
+            if not self._args.priority is None:
                 import psutil
                 classes = [psutil.IDLE_PRIORITY_CLASS, psutil.BELOW_NORMAL_PRIORITY_CLASS, psutil.NORMAL_PRIORITY_CLASS, psutil.ABOVE_NORMAL_PRIORITY_CLASS, psutil.HIGH_PRIORITY_CLASS, psutil.REALTIME_PRIORITY_CLASS]
                 p = psutil.Process(os.getpid())
-                p.nice(classes[args.priority])
+                p.nice(classes[self._args.priority])
 
-        if os.name == 'nt' and (args.list_cameras > 0 or not args.list_dcaps is None):
+        if os.name == 'nt' and (self._args.list_cameras > 0 or not self._args.list_dcaps is None):
             cap = dshowcapture.DShowCapture()
             info = cap.get_info()
             unit = 10000000.;
-            if not args.list_dcaps is None:
+            if not self._args.list_dcaps is None:
                 formats = {0: "Any", 1: "Unknown", 100: "ARGB", 101: "XRGB", 200: "I420", 201: "NV12", 202: "YV12", 203: "Y800", 300: "YVYU", 301: "YUY2", 302: "UYVY", 303: "HDYC (Unsupported)", 400: "MJPEG", 401: "H264" }
                 for cam in info:
-                    if args.list_dcaps == -1:
+                    if self._args.list_dcaps == -1:
                         type_ = ""
                         if cam['type'] == "Blackmagic":
                             type_ = "Blackmagic: "
                         print(f"{cam['index']}: {type_}{cam['name']}")
-                    if args.list_dcaps != -1 and args.list_dcaps != cam['index']:
+                    if self._args.list_dcaps != -1 and self._args.list_dcaps != cam['index']:
                         continue
                     for caps in cam['caps']:
                         format = caps['format']
@@ -169,13 +174,13 @@ class Facetracker(object):
                         else:
                             print(f"    {caps['id']}: Resolution: {caps['minCX']}x{caps['minCY']}-{caps['maxCX']}x{caps['maxCY']} FPS: {unit/caps['maxInterval']:.3f}-{unit/caps['minInterval']:.3f} Format: {format}")
             else:
-                if args.list_cameras == 1:
+                if self._args.list_cameras == 1:
                     print("Available cameras:")
                 for cam in info:
                     type_ = ""
                     if cam['type'] == "Blackmagic":
                         type_ = "Blackmagic: "
-                    if args.list_cameras == 1:
+                    if self._args.list_cameras == 1:
                         print(f"{cam['index']}: {type_}{cam['name']}")
                     else:
                         print(f"{type_}{cam['name']}")
@@ -195,12 +200,12 @@ class Facetracker(object):
         from .tracker import Tracker, get_model_base_path
 
 
-        if args.benchmark > 0:
-            model_base_path = get_model_base_path(args.model_dir)
+        if self._args.benchmark > 0:
+            model_base_path = get_model_base_path(self._args.model_dir)
             im = cv2.imread(os.path.join(model_base_path, "benchmark.bin"), cv2.IMREAD_COLOR)
             results = []
             for model_type in [3, 2, 1, 0, -1, -2, -3]:
-                tracker = Tracker(224, 224, threshold=0.1, max_threads=args.max_threads, max_faces=1, discard_after=0, scan_every=0, silent=True, model_type=model_type, model_dir=args.model_dir, no_gaze=(model_type == -1), detection_threshold=0.1, use_retinaface=0, max_feature_updates=900, static_model=True if args.no_3d_adapt == 1 else False)
+                tracker = Tracker(224, 224, threshold=0.1, max_threads=self._args.max_threads, max_faces=1, discard_after=0, scan_every=0, silent=True, model_type=model_type, model_dir=self._args.model_dir, no_gaze=(model_type == -1), detection_threshold=0.1, use_retinaface=0, max_feature_updates=900, static_model=True if self._args.no_3d_adapt == 1 else False)
                 tracker.detected = 1
                 tracker.faces = [(0, 0, 224, 224)]
                 total = 0.0
@@ -212,24 +217,24 @@ class Facetracker(object):
             sys.exit(0)
 
         socket_af, socket_sk, x, y, socket_addr = socket.getaddrinfo(
-            args.ip, args.port, socket.AF_INET, socket.SOCK_DGRAM)[0]
+            self._args.ip, self._args.port, socket.AF_INET, socket.SOCK_DGRAM)[0]
 
-        if args.faces >= 40:
+        if self._args.faces >= 40:
             print("Transmission of tracking data over network is not supported with 40 or more faces.")
 
         fps = 0
         dcap = None
         use_dshowcapture_flag = False
         if os.name == 'nt':
-            fps = args.fps
-            dcap = args.dcap
-            use_dshowcapture_flag = True if args.use_dshowcapture == 1 else False
-            input_reader = InputReader(args.capture, args.raw_rgb, args.width, args.height, fps, use_dshowcapture=use_dshowcapture_flag, dcap=dcap, mirror=mirror)
-            if args.dcap == -1 and type(input_reader) == DShowCaptureReader:
+            fps = self._args.fps
+            dcap = self._args.dcap
+            use_dshowcapture_flag = True if self._args.use_dshowcapture == 1 else False
+            input_reader = InputReader(self._args.capture, self._args.raw_rgb, self._args.width, self._args.height, fps, use_dshowcapture=use_dshowcapture_flag, dcap=dcap, mirror=mirror)
+            if self._args.dcap == -1 and type(input_reader) == DShowCaptureReader:
                 fps = min(fps, input_reader.device.get_fps())
         else:
             fps = 0
-            input_reader = InputReader(args.capture, args.raw_rgb, args.width, args.height, fps, use_dshowcapture=use_dshowcapture_flag, mirror=args.mirror)
+            input_reader = InputReader(self._args.capture, self._args.raw_rgb, self._args.width, self._args.height, fps, use_dshowcapture=use_dshowcapture_flag, mirror=self._args.mirror)
         if type(input_reader.reader) == VideoReader:
             fps = 0
 
@@ -245,19 +250,19 @@ class Facetracker(object):
         tracking_frames = 0
         frame_count = 0
 
-        if args.log_data != "":
-            log = open(args.log_data, "w")
+        if self._args.log_data != "":
+            log = open(self._args.log_data, "w")
             self._write_header(log)
             log.flush()
 
-        is_camera = args.capture == str(try_int(args.capture))
+        is_camera = self._args.capture == str(try_int(self._args.capture))
 
         attempt = 0
         frame_time = time.perf_counter()
         target_duration = 0
         if fps > 0:
             target_duration = 1. / float(fps)
-        repeat = args.repeat_video != 0 and type(input_reader.reader) == VideoReader
+        repeat = self._args.repeat_video != 0 and type(input_reader.reader) == VideoReader
         need_reinit = 0
         failures = 0
         source_name = input_reader.name
@@ -265,7 +270,7 @@ class Facetracker(object):
             time_ns = time.time_ns()
 
             if not input_reader.is_open() or need_reinit == 1:
-                input_reader = InputReader(args.capture, args.raw_rgb, args.width, args.height, fps, use_dshowcapture=use_dshowcapture_flag, dcap=dcap, mirror=args.mirror)
+                input_reader = InputReader(self._args.capture, self._args.raw_rgb, self._args.width, self._args.height, fps, use_dshowcapture=use_dshowcapture_flag, dcap=dcap, mirror=self._args.mirror)
                 if input_reader.name != source_name:
                     print(f"Failed to reinitialize camera and got {input_reader.name} instead of {source_name}.")
                     sys.exit(1)
@@ -303,9 +308,9 @@ class Facetracker(object):
                 first = False
                 height, width, channels = frame.shape
                 sock = socket.socket(socket_af, socket_sk)
-                tracker = Tracker(width, height, threshold=args.threshold, max_threads=args.max_threads, max_faces=args.faces, discard_after=args.discard_after, scan_every=args.scan_every, silent=False if args.silent == 0 else True, model_type=args.model, model_dir=args.model_dir, no_gaze=False if args.gaze_tracking != 0 and args.model != -1 else True, detection_threshold=args.detection_threshold, use_retinaface=args.scan_retinaface, max_feature_updates=args.max_feature_updates, static_model=True if args.no_3d_adapt == 1 else False, try_hard=args.try_hard == 1)
-                if not args.video_out is None:
-                    out = cv2.VideoWriter(args.video_out, cv2.VideoWriter_fourcc('F','F','V','1'), args.video_fps, (width * args.video_scale, height * args.video_scale))
+                tracker = Tracker(width, height, threshold=self._args.threshold, max_threads=self._args.max_threads, max_faces=self._args.faces, discard_after=self._args.discard_after, scan_every=self._args.scan_every, silent=False if self._args.silent == 0 else True, model_type=self._args.model, model_dir=self._args.model_dir, no_gaze=False if self._args.gaze_tracking != 0 and self._args.model != -1 else True, detection_threshold=self._args.detection_threshold, use_retinaface=self._args.scan_retinaface, max_feature_updates=self._args.max_feature_updates, static_model=True if self._args.no_3d_adapt == 1 else False, try_hard=self._args.try_hard == 1)
+                if not self._args.video_out is None:
+                    out = cv2.VideoWriter(self._args.video_out, cv2.VideoWriter_fourcc('F','F','V','1'), self._args.video_fps, (width * self._args.video_scale, height * self._args.video_scale))
 
             try:
                 inference_start = time.perf_counter()
@@ -319,12 +324,12 @@ class Facetracker(object):
                 detected = False
                 for face_num, f in enumerate(faces):
                     f = copy.copy(f)
-                    f.id += args.face_id_offset
+                    f.id += self._args.face_id_offset
                     if f.eye_blink is None:
                         f.eye_blink = [1, 1]
                     right_state = "O" if f.eye_blink[0] > 0.30 else "-"
                     left_state = "O" if f.eye_blink[1] > 0.30 else "-"
-                    if args.silent == 0:
+                    if self._args.silent == 0:
                         print(f"Confidence[{f.id}]: {f.conf:.4f} / 3D fitting error: {f.pnp_error:.4f} / Eyes: {left_state}, {right_state}")
                     detected = True
                     if not f.success:
@@ -350,18 +355,18 @@ class Facetracker(object):
                     if not log is None:
                         log.write(f"{frame_count},{now},{width},{height},{fps},{face_num},{f.id},{f.eye_blink[0]},{f.eye_blink[1]},{f.conf},{f.success},{f.pnp_error},{f.quaternion[0]},{f.quaternion[1]},{f.quaternion[2]},{f.quaternion[3]},{f.euler[0]},{f.euler[1]},{f.euler[2]},{f.rotation[0]},{f.rotation[1]},{f.rotation[2]},{f.translation[0]},{f.translation[1]},{f.translation[2]}")
 
-                    if args.protocol == 2:
+                    if self._args.protocol == 2:
                         packet.extend(bytearray(struct.pack("B", len(f.lms))))
-                    if args.protocol <= 2:
+                    if self._args.protocol <= 2:
                         for (x,y,c) in f.lms:
                             packet.extend(bytearray(struct.pack("f", c)))
 
-                    if args.visualize > 1:
+                    if self._args.visualize > 1:
                         frame = cv2.putText(frame, str(f.id), (int(f.bbox[0]), int(f.bbox[1])), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255,0,255))
-                    if args.visualize > 2:
+                    if self._args.visualize > 2:
                         frame = cv2.putText(frame, f"{f.conf:.4f}", (int(f.bbox[0] + 18), int(f.bbox[1] - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255))
 
-                    if args.protocol <= 2:
+                    if self._args.protocol <= 2:
                         for pt_num, (x,y,c) in enumerate(f.lms):
                             packet.extend(bytearray(struct.pack("f", y)))
                             packet.extend(bytearray(struct.pack("f", x)))
@@ -373,44 +378,37 @@ class Facetracker(object):
                                 continue
                             x = int(x + 0.5)
                             y = int(y + 0.5)
-                            if args.visualize != 0 or not out is None:
-                                if args.visualize > 3:
+                            if self._args.visualize != 0 or not out is None:
+                                if self._args.visualize > 3:
                                     frame = cv2.putText(frame, str(pt_num), (int(y), int(x)), cv2.FONT_HERSHEY_SIMPLEX, 0.25, (255,255,0))
                                 color = (0, 255, 0)
                                 if pt_num >= 66:
                                     color = (255, 255, 0)
-                                if not (x < 0 or y < 0 or x >= height or y >= width):
-                                    frame[int(x), int(y)] = color
+                                self._set_pixel(frame, x, y, color)
                                 x += 1
-                                if not (x < 0 or y < 0 or x >= height or y >= width):
-                                    frame[int(x), int(y)] = color
+                                self._set_pixel(frame, x, y, color)
                                 y += 1
-                                if not (x < 0 or y < 0 or x >= height or y >= width):
-                                    frame[int(x), int(y)] = color
+                                self._set_pixel(frame, x, y, color)
                                 x -= 1
-                                if not (x < 0 or y < 0 or x >= height or y >= width):
-                                    frame[int(x), int(y)] = color
-                        if args.pnp_points != 0 and (args.visualize != 0 or not out is None) and f.rotation is not None:
-                            if args.pnp_points > 1:
+                                self._set_pixel(frame, x, y, color)
+
+                        if self._args.pnp_points != 0 and (self._args.visualize != 0 or not out is None) and f.rotation is not None:
+                            if self._args.pnp_points > 1:
                                 projected = cv2.projectPoints(f.face_3d[0:66], f.rotation, f.translation, tracker.camera, tracker.dist_coeffs)
                             else:
                                 projected = cv2.projectPoints(f.contour, f.rotation, f.translation, tracker.camera, tracker.dist_coeffs)
                             for [(x,y)] in projected[0]:
                                 x = int(x + 0.5)
                                 y = int(y + 0.5)
-                                if not (x < 0 or y < 0 or x >= height or y >= width):
-                                    frame[int(x), int(y)] = (0, 255, 255)
+                                self._set_pixel(frame, x, y, color)
                                 x += 1
-                                if not (x < 0 or y < 0 or x >= height or y >= width):
-                                    frame[int(x), int(y)] = (0, 255, 255)
+                                self._set_pixel(frame, x, y, color)
                                 y += 1
-                                if not (x < 0 or y < 0 or x >= height or y >= width):
-                                    frame[int(x), int(y)] = (0, 255, 255)
+                                self._set_pixel(frame, x, y, color)
                                 x -= 1
-                                if not (x < 0 or y < 0 or x >= height or y >= width):
-                                    frame[int(x), int(y)] = (0, 255, 255)
+                                self._set_pixel(frame, x, y, color)
 
-                    if args.protocol >= 2:
+                    if self._args.protocol >= 2:
                         packet.extend(bytearray(struct.pack("B", len(f.pts_3d))))
                     for (x,y,z) in f.pts_3d:
                         packet.extend(bytearray(struct.pack("f", x)))
@@ -431,7 +429,7 @@ class Facetracker(object):
                         log.flush()
 
                 if detected and len(faces) < 40:
-                    if args.protocol >= 3:
+                    if self._args.protocol >= 3:
                         checksum = sum(packet) & 0xffff  # to uint16
                         header = bytearray(struct.pack('H', checksum))
                         packet = header + packet
@@ -439,16 +437,16 @@ class Facetracker(object):
 
                 if not out is None:
                     video_frame = frame
-                    if args.video_scale != 1:
-                        video_frame = cv2.resize(frame, (width * args.video_scale, height * args.video_scale), interpolation=cv2.INTER_NEAREST)
+                    if self._args.video_scale != 1:
+                        video_frame = cv2.resize(frame, (width * self._args.video_scale, height * self._args.video_scale), interpolation=cv2.INTER_NEAREST)
                     out.write(video_frame)
-                    if args.video_scale != 1:
+                    if self._args.video_scale != 1:
                         del video_frame
 
-                if args.visualize != 0:
+                if self._args.visualize != 0:
                     cv2.imshow('OpenSeeFace Visualization', frame)
                     if cv2.waitKey(1) & 0xFF == ord('q'):
-                        if args.dump_points != "" and not faces is None and len(faces) > 0:
+                        if self._args.dump_points != "" and not faces is None and len(faces) > 0:
                             np.set_printoptions(threshold=sys.maxsize, precision=15)
                             points = copy.copy(faces[0].face_3d)
                             for a, b in const.POINTS_PAIRS:
@@ -461,13 +459,13 @@ class Facetracker(object):
                                 points[[a, b], 2] = z
                             points[[8, 27, 28, 29, 33, 50, 55, 60, 64], 0] = 0.0
                             points[30, :] = 0.0
-                            with open(args.dump_points, "w") as fh:
+                            with open(self._args.dump_points, "w") as fh:
                                 fh.write(repr(points))
                         break
                 failures = 0
             except Exception as e:
                 if e.__class__ == KeyboardInterrupt:
-                    if args.silent == 0:
+                    if self._args.silent == 0:
                         print("Quitting")
                     break
                 traceback.print_exc()
@@ -490,13 +488,13 @@ class Facetracker(object):
                 duration = time.perf_counter() - frame_time
             frame_time = time.perf_counter()
 
-            if args.limit_fps:
+            if self._args.limit_fps:
                 dt = time.time_ns() - time_ns
-                target_ms = 1000 / args.limit_fps
+                target_ms = 1000 / self._args.limit_fps
                 wait = max(0, (target_ms * 1000000 - dt) / 1000000)
                 time.sleep(wait / 1000)
 
-        if args.silent == 0:
+        if self._args.silent == 0:
             print("Quitting")
 
         input_reader.close()
@@ -504,7 +502,7 @@ class Facetracker(object):
             out.release()
         cv2.destroyAllWindows()
 
-        if args.silent == 0 and tracking_frames > 0:
+        if self._args.silent == 0 and tracking_frames > 0:
             average_tracking_time = 1000 * tracking_time / tracking_frames
             print(f"Average tracking time per detected face: {average_tracking_time:.2f} ms")
             print(f"Tracking time: {total_tracking_time:.3f} s\nFrames: {tracking_frames}")
