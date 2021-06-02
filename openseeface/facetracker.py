@@ -6,13 +6,13 @@ To run it from source tree:
 $ python -m openseeface.facetracker
 """
 
-import copy
-import os
-import sys
 import argparse
-import traceback
+import copy
 import gc
+import os
 import signal
+import sys
+import traceback
 
 
 class Facetracker(object):
@@ -26,10 +26,12 @@ class Facetracker(object):
     def _handle_signal(self, signalnum, frame):
         self._is_running = False
 
-    def run(self):
+    def _parse_args(self):
         parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
         parser.add_argument("-i", "--ip", help="Set IP address for sending tracking data", default="127.0.0.1")
         parser.add_argument("-p", "--port", type=int, help="Set port for sending tracking data", default=11573)
+
         if os.name == 'nt':
             parser.add_argument("-l", "--list-cameras", type=int, help="Set this to 1 to list the available cameras and quit, set this to 2 or higher to output only the names", default=0)
             parser.add_argument("-a", "--list-dcaps", type=int, help="Set this to -1 to list all cameras and their available capabilities, set this to a camera id to list that camera's capabilities", default=None)
@@ -41,6 +43,7 @@ class Facetracker(object):
         else:
             parser.add_argument("-W", "--width", type=int, help="Set raw RGB width", default=640)
             parser.add_argument("-H", "--height", type=int, help="Set raw RGB height", default=360)
+
         parser.add_argument("-c", "--capture", help="Set camera ID (0, 1...) or video file", default="0")
         parser.add_argument("-m", "--max-threads", type=int, help="Set the maximum number of threads", default=1)
         parser.add_argument("-t", "--threshold", type=float, help="Set minimum confidence threshold for face tracking", default=None)
@@ -72,11 +75,36 @@ class Facetracker(object):
         parser.add_argument("--limit-fps", type=int, help="Limit app's max frame rate")
         parser.add_argument("--protocol", type=int, help="Protocol version to use", default=1)
         parser.add_argument("--write-pid", type=str, help="Write process ID to file", required=False)
+
         if os.name == 'nt':
             parser.add_argument("--use-dshowcapture", type=int, help="When set to 1, libdshowcapture will be used for video input instead of OpenCV", default=1)
             parser.add_argument("--blackmagic-options", type=str, help="When set, this additional option string is passed to the blackmagic capture library", default=None)
             parser.add_argument("--priority", type=int, help="When set, the process priority will be changed", default=None, choices=[0, 1, 2, 3, 4, 5])
-        args = parser.parse_args()
+
+        return parser.parse_args()
+
+    def _write_header(self, log):
+        log.write(
+            'Frame,Time,Width,Height,FPS,Face,FaceID,RightOpen,LeftOpen,'
+            'AverageConfidence,Success3D,PnPError,'
+            'RotationQuat.X,RotationQuat.Y,RotationQuat.Z,RotationQuat.W,'
+            'Euler.X,Euler.Y,Euler.Z,'
+            'RVec.X,RVec.Y,RVec.Z,'
+            'TVec.X,TVec.Y,TVec.Z')
+
+        for i in range(66):
+            log.write(f',Landmark[{i}].X,Landmark[{i}].Y,Landmark[{i}].Confidence')
+
+        for i in range(66):
+            log.write(f',Point3D[{i}].X,Point3D[{i}].Y,Point3D[{i}].Z')
+
+        for feature in const.FEATURES:
+            log.write(f',{feature}')
+
+        log.write('\r\n')
+
+    def run(self):
+        args = self._parse_args()
 
         if args.write_pid:
             if os.path.exists(args.write_pid):
@@ -162,6 +190,7 @@ class Facetracker(object):
         import struct
         import json
 
+        from . import const
         from .input_reader import InputReader, VideoReader, DShowCaptureReader, try_int
         from .tracker import Tracker, get_model_base_path
 
@@ -216,18 +245,9 @@ class Facetracker(object):
         tracking_frames = 0
         frame_count = 0
 
-        features = ["eye_l", "eye_r", "eyebrow_steepness_l", "eyebrow_updown_l", "eyebrow_quirk_l", "eyebrow_steepness_r", "eyebrow_updown_r", "eyebrow_quirk_r", "mouth_corner_updown_l", "mouth_corner_inout_l", "mouth_corner_updown_r", "mouth_corner_inout_r", "mouth_open", "mouth_wide"]
-
         if args.log_data != "":
             log = open(args.log_data, "w")
-            log.write("Frame,Time,Width,Height,FPS,Face,FaceID,RightOpen,LeftOpen,AverageConfidence,Success3D,PnPError,RotationQuat.X,RotationQuat.Y,RotationQuat.Z,RotationQuat.W,Euler.X,Euler.Y,Euler.Z,RVec.X,RVec.Y,RVec.Z,TVec.X,TVec.Y,TVec.Z")
-            for i in range(66):
-                log.write(f",Landmark[{i}].X,Landmark[{i}].Y,Landmark[{i}].Confidence")
-            for i in range(66):
-                log.write(f",Point3D[{i}].X,Point3D[{i}].Y,Point3D[{i}].Z")
-            for feature in features:
-                log.write(f",{feature}")
-            log.write("\r\n")
+            self._write_header(log)
             log.flush()
 
         is_camera = args.capture == str(try_int(args.capture))
@@ -430,38 +450,8 @@ class Facetracker(object):
                     if cv2.waitKey(1) & 0xFF == ord('q'):
                         if args.dump_points != "" and not faces is None and len(faces) > 0:
                             np.set_printoptions(threshold=sys.maxsize, precision=15)
-                            pairs = [
-                                (0, 16),
-                                (1, 15),
-                                (2, 14),
-                                (3, 13),
-                                (4, 12),
-                                (5, 11),
-                                (6, 10),
-                                (7, 9),
-                                (17, 26),
-                                (18, 25),
-                                (19, 24),
-                                (20, 23),
-                                (21, 22),
-                                (31, 35),
-                                (32, 34),
-                                (36, 45),
-                                (37, 44),
-                                (38, 43),
-                                (39, 42),
-                                (40, 47),
-                                (41, 46),
-                                (48, 52),
-                                (49, 51),
-                                (56, 54),
-                                (57, 53),
-                                (58, 62),
-                                (59, 61),
-                                (65, 63)
-                            ]
                             points = copy.copy(faces[0].face_3d)
-                            for a, b in pairs:
+                            for a, b in const.POINTS_PAIRS:
                                 x = (points[a, 0] - points[b, 0]) / 2.0
                                 y = (points[a, 1] + points[b, 1]) / 2.0
                                 z = (points[a, 2] + points[b, 2]) / 2.0
