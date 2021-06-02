@@ -107,8 +107,12 @@ class Facetracker(object):
     def _set_pixel(self, frame, x, y, color):
         height, width, channels = frame.shape
 
-        if (0 <= x < height) and (0 <= y < width):
-            frame[int(x), int(y)] = color
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                x2 = x + dx
+                y2 = y + dy
+                if (0 <= x2 < height) and (0 <= y2 < width):
+                    frame[int(x2), int(y2)] = color
 
     def run(self):
         if self._args.write_pid:
@@ -376,20 +380,13 @@ class Facetracker(object):
                                 continue
                             if pt_num == 67 and (f.eye_blink[1] < 0.30 or c < 0.30):
                                 continue
-                            x = int(x + 0.5)
-                            y = int(y + 0.5)
                             if self._args.visualize != 0 or not out is None:
                                 if self._args.visualize > 3:
                                     frame = cv2.putText(frame, str(pt_num), (int(y), int(x)), cv2.FONT_HERSHEY_SIMPLEX, 0.25, (255,255,0))
-                                color = (0, 255, 0)
                                 if pt_num >= 66:
                                     color = (255, 255, 0)
-                                self._set_pixel(frame, x, y, color)
-                                x += 1
-                                self._set_pixel(frame, x, y, color)
-                                y += 1
-                                self._set_pixel(frame, x, y, color)
-                                x -= 1
+                                else:
+                                    color = (0, 255, 0)
                                 self._set_pixel(frame, x, y, color)
 
                         if self._args.pnp_points != 0 and (self._args.visualize != 0 or not out is None) and f.rotation is not None:
@@ -398,14 +395,6 @@ class Facetracker(object):
                             else:
                                 projected = cv2.projectPoints(f.contour, f.rotation, f.translation, tracker.camera, tracker.dist_coeffs)
                             for [(x,y)] in projected[0]:
-                                x = int(x + 0.5)
-                                y = int(y + 0.5)
-                                self._set_pixel(frame, x, y, color)
-                                x += 1
-                                self._set_pixel(frame, x, y, color)
-                                y += 1
-                                self._set_pixel(frame, x, y, color)
-                                x -= 1
                                 self._set_pixel(frame, x, y, color)
 
                     if self._args.protocol >= 2:
@@ -418,7 +407,7 @@ class Facetracker(object):
                             log.write(f",{x},{-y},{-z}")
                     if f.current_features is None:
                         f.current_features = {}
-                    for feature in features:
+                    for feature in const.FEATURES:
                         if not feature in f.current_features:
                             f.current_features[feature] = 0
                         packet.extend(bytearray(struct.pack("f", f.current_features[feature])))
