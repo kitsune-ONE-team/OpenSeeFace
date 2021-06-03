@@ -22,8 +22,8 @@ if __name__ == "__main__":
         long_description=(
             'Robust realtime face and facial landmark tracking '
             'on CPU/GPU with Unity integration'),
-        url='https://github.com/tobspr/RenderPipeline/wiki',
-        download_url='https://github.com/tobspr/RenderPipeline',
+        url='https://github.com/kitsune-ONE-team/OpenSeeFace',
+        download_url='https://github.com/kitsune-ONE-team/OpenSeeFace',
         author='Emiliana',
         license='BSD-2-Clause License',
         packages=(
@@ -39,6 +39,7 @@ if __name__ == "__main__":
         extras_require={
             'cpu': ['onnxruntime'],
             'gpu': ['onnxruntime-gpu'],
+            'mediapipe': ['mediapipe'],
         },
         entry_points={
             'console_scripts': (

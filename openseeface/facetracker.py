@@ -258,6 +258,7 @@ class Facetracker(object):
         tracking_time = 0.0
         tracking_frames = 0
         frame_count = 0
+        mp_solver = None
 
         if self._args.log_data != "":
             log = open(self._args.log_data, "w")
@@ -468,33 +469,40 @@ class Facetracker(object):
                     hand_landmarks = []
 
                     if self._args.hands > 0:
-                        with mediapipe.solutions.hands.Hands(
+                        if mp_solver is None:
+                            mp_solver = mediapipe.solutions.hands.Hands(
+                                max_num_hands=self._args.hands,
+                                static_image_mode=False,
                                 min_detection_confidence=0.5,
-                                min_tracking_confidence=0.5) as mp_solver:
+                                min_tracking_confidence=0.5)
 
-                            mp_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                            mp_solution = mp_solver.process(mp_frame)
-                            if mp_solution.multi_handedness and mp_solution.multi_hand_landmarks:
-                                for i, (hand, landmarks) in enumerate(zip(
-                                        mp_solution.multi_handedness,
-                                        mp_solution.multi_hand_landmarks)):
-                                    c = hand.classification[0]
-                                    hand_landmarks.append((c, []))
+                        mp_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        mp_solution = mp_solver.process(mp_frame)
+                        if mp_solution.multi_handedness and mp_solution.multi_hand_landmarks:
+                            for i, (hand, landmarks) in enumerate(zip(
+                                    mp_solution.multi_handedness,
+                                    mp_solution.multi_hand_landmarks)):
+                                c = hand.classification[0]
 
-                                    for j, landmark in enumerate(landmarks.landmark):
-                                        hand_landmarks[-1][1].append(landmark)
-                                        self._set_pixel(
-                                            frame,
-                                            landmark.y * height,
-                                            landmark.x * width,
-                                            const.COLOR_CYAN)
+                                is_left = c.label == 'Right'  # mediapipe expects mirrored image
+                                if self._args.mirror:
+                                    is_left = not is_left
 
-                                    if i >= self._args.hands - 1:
-                                        break
+                                hand_landmarks.append((is_left, []))
+                                for j, landmark in enumerate(landmarks.landmark):
+                                    hand_landmarks[-1][1].append(landmark)
+                                    if is_left:
+                                        color = const.COLOR_RED
+                                    else:
+                                        color = const.COLOR_CYAN
+                                    self._set_pixel(frame, landmark.y * height, landmark.x * width, color)
+
+                                if i >= self._args.hands - 1:
+                                    break
 
                     packet.extend(bytearray(struct.pack("B", len(hand_landmarks))))
-                    for hand, landmarks in hand_landmarks:
-                        packet.extend(bytearray(struct.pack("B", 1 if c.label == 'Left' else 0)))
+                    for is_left, landmarks in hand_landmarks:
+                        packet.extend(bytearray(struct.pack("B", 1 if is_left else 0)))
                         packet.extend(bytearray(struct.pack("B", len(landmarks))))
                         for landmark in landmarks:
                             packet.extend(bytearray(struct.pack("f", landmark.x)))
