@@ -3,14 +3,16 @@ import sys
 import os
 import cv2
 import numpy as np
-import escapi
-import dshowcapture
 import time
 import traceback
 import gc
 
+from . import escapi
+from . import dshowcapture
+
+
 class VideoReader():
-    def __init__(self, capture, camera=False):
+    def __init__(self, capture, camera=False, mirror=False):
         if os.name == 'nt' and camera:
             self.cap = cv2.VideoCapture(capture, cv2.CAP_DSHOW)
         else:
@@ -19,12 +21,16 @@ class VideoReader():
             print("The video source cannot be opened")
             sys.exit(0)
         self.name = str(capture)
+        self.mirror = mirror
     def is_open(self):
         return self.cap.isOpened()
     def is_ready(self):
         return True
     def read(self):
-        return self.cap.read()
+        ret, frame = self.cap.read()
+        if self.mirror:
+            frame = cv2.flip(frame, 1)
+        return ret, frame
     def close(self):
         self.cap.release()
 
@@ -102,13 +108,13 @@ class DShowCaptureReader(VideoReader):
         self.device.destroy_capture()
 
 class OpenCVReader(VideoReader):
-    def __init__(self, capture, width, height, fps):
+    def __init__(self, capture, width, height, fps, mirror=False):
         self.device = None
         self.width = width
         self.height = height
         self.fps = fps
         self.name = str(capture)
-        super(OpenCVReader, self).__init__(capture, camera=True)
+        super(OpenCVReader, self).__init__(capture, camera=True, mirror=mirror)
         self.cap.set(3, width)
         self.cap.set(4, height)
     def is_open(self):
@@ -177,14 +183,14 @@ def test_reader(reader):
         return False
 
 class InputReader():
-    def __init__(self, capture, raw_rgb, width, height, fps, use_dshowcapture=False, dcap=None):
+    def __init__(self, capture, raw_rgb, width, height, fps, use_dshowcapture=False, dcap=None, mirror=False):
         self.reader = None
         self.name = str(capture)
         try:
             if raw_rgb > 0:
                 self.reader = RawReader(width, height)
             elif os.path.exists(capture):
-                self.reader = VideoReader(capture)
+                self.reader = VideoReader(capture, mirror=mirror)
             elif capture == str(try_int(capture)):
                 if os.name == 'nt':
                     # Try with DShowCapture
@@ -229,10 +235,10 @@ class InputReader():
                         return
                     # Try with OpenCV
                     print(f"Escapi failed. Falling back to OpenCV. If this fails, please change your camera settings.", file=sys.stderr)
-                    self.reader = OpenCVReader(int(capture), width, height, fps)
+                    self.reader = OpenCVReader(int(capture), width, height, fps, mirror=mirror)
                     self.name = self.reader.name
                 else:
-                    self.reader = OpenCVReader(int(capture), width, height, fps)
+                    self.reader = OpenCVReader(int(capture), width, height, fps, mirror=mirror)
         except Exception as e:
             print("Error: " + str(e))
 

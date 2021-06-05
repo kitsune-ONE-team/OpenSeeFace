@@ -7,9 +7,11 @@ import time
 import queue
 import threading
 import copy
-from similaritytransform import SimilarityTransform
-from retinaface import RetinaFaceDetector
-from remedian import remedian
+
+from .similaritytransform import SimilarityTransform
+from .retinaface import RetinaFaceDetector
+from .remedian import remedian
+
 
 def resolve(name):
     f = os.path.join(os.path.dirname(__file__), name)

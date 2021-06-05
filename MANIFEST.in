@@ -1,0 +1,2 @@
+recursive-include openseeface/models *.onnx
+recursive-include openseeface/models *.json
