@@ -30,7 +30,7 @@ public class OpenSeeVRMDriver : MonoBehaviour {
     public OpenSeeIKTarget openSeeIKTarget;
     [Tooltip("This is the target VRM avatar's blend shape proxy.")]
     public VRMBlendShapeProxy vrmBlendShapeProxy;
-    [Tooltip("When this is enabled, no blendshapes are applied.")]
+    [Tooltip("When this is enabled, no blendshapes are set.")]
     public bool skipApply = false;
     [Tooltip("When this is enabled, no gaze tracking (bone or blendshape) is applied.")]
     public bool skipApplyEyes = false;
@@ -38,10 +38,12 @@ public class OpenSeeVRMDriver : MonoBehaviour {
     public bool skipApplyJaw = false;
     [Tooltip("When this is enabled in addition to skipApply, expressions from hotkeys or expression detection are still applied.")]
     public bool stillApplyExpressions = false;
-    [Tooltip("This factor is multiplied to all blendshape weights as well as gaze and jaw tracking.")]
+    [Tooltip("This factor is multiplied to all blendshape weights relating to camera tracking, as well as gaze and jaw tracking.")]
     public float blendShapeWeight = 1f;
     [Tooltip("This needs to be enabled when tracking with the fast 30 point model.")]
     public bool only30Points = false;
+    [Tooltip("When enabled, if a model has perfect sync blendshapes, they will be used for more detailed tracking. (Experimental!)")]
+    public bool useCameraPerfectSync = false;
     //[Tooltip("When set to true, expression and audio data will be processed in FixedUpdate, otherwise it will be processed in Update.")]
     //public bool fixedUpdate = true;
     [Tooltip("When enabled, the avatar will blink automatically. Otherwise, blinks will be applied according to the face tracking's blink detection, allowing it to wink. Even for tracked eye blinks, the eye blink setting of the current expression is used.")]
@@ -66,6 +68,8 @@ public class OpenSeeVRMDriver : MonoBehaviour {
     public bool linkBlinks = true;
     [Tooltip("When enabled, it becomes possible to wink even with link blinks enabled.")]
     public bool allowWinking = false;
+    [Tooltip("If allowWinking is enabled, if the eye blink values are within this distance, the blink is linked.")]
+    public float smartWinkThreshold = 0.85f;
     [Tooltip("When enabled, the avatar's eye will move according to the face tracker's gaze tracking.")]
     public bool gazeTracking = true;
     [Tooltip("This is the right eye bone. When either eye bone is not set, the VRM look direction blendshapes are used instead.")]
@@ -118,6 +122,8 @@ public class OpenSeeVRMDriver : MonoBehaviour {
     public bool hybridLipSync = false;
     [Tooltip("When enabled, viseme size will not depend on the OVR Lip Sync weight.")]
     public bool maximizeLipSync = false;
+    [Tooltip("When enabled, mouth blendshapes are normalized if they add up to a value above 1.")]
+    public bool visemeNormalization = true;
     [Tooltip("When enabled and the animator of the avatar has a float parameter called JawMovement, this parameter will be set to values from 0 to 1, corresponding to a closed to open mouth. This can be used for animating jaw bones.")]
     public bool animateJawBone = false;
     [Tooltip("This should be set to the included mecanim animation, which sets the jaw bone to closed on the first frame and to open on the second frame.")]
@@ -232,7 +238,7 @@ public class OpenSeeVRMDriver : MonoBehaviour {
     private float currentExpressionEyebrowWeight;
     private float currentExpressionVisemeFactor;
     
-    private OpenSeeBlendShapeProxy proxy = new OpenSeeBlendShapeProxy();
+    private OpenSeeBlendShapeProxy proxy = null;
     private Animator animator;
     private bool haveJawParameter;
     private Transform jawBone;
@@ -255,6 +261,9 @@ public class OpenSeeVRMDriver : MonoBehaviour {
     private float[] currentBrowStates;
     private TimeInterpolate browInterpolate;
     private BlendShapeKey[] browClips;
+    
+    private bool trackMouth = false;
+    private double lastPerfectSync = -1;
     
     private float lastAudioTime = -1f;
 
@@ -290,23 +299,57 @@ public class OpenSeeVRMDriver : MonoBehaviour {
     // This class is used to ensure max() based instead of add() based blendshape accumulation and to allow setting animator parameters from blendshape values
     private class OpenSeeBlendShapeProxy {
         private HashSet<string> browsBlendShapes = new HashSet<string>() { "BROWS UP", "BROWS DOWN", "BROWINNERUP", "BROWDOWNLEFT", "BROWDOWNRIGHT", "BROWOUTERUPLEFT", "BROWOUTERUPRIGHT", "NOSESNEERLEFT", "NOSESNEERRIGHT" };
-        private HashSet<string> eyesBlendShapes = new HashSet<string>() { "BLINK", "BLINK_L", "BLINK_R", "EYELOOKUPLEFT", "EYELOOKUPRIGHT", "EYELOOKDOWNLEFT", "EYELOOKDOWNRIGHT", "EYELOOKINLEFT", "EYELOOKINRIGHT", "EYELOOKOUTLEFT", "EYELOOKOUTRIGHT", "EYEBLINKLEFT", "EYEBLINKRIGHT", "EYESQUINTRIGHT", "EYESQUINTLEFT", "EYEWIDELEFT", "EYEWIDERIGHT", "NOSESNEERLEFT", "NOSESNEERRIGHT", "CHEEKSQUITLEFT", "CHEEKSQUINTRIGHT" };
-        private HashSet<string> mouthBlendShapes = new HashSet<string>() { "A", "I", "U", "E", "O", "SIL", "CH", "DD", "FF", "KK", "NN", "PP", "RR", "SS", "TH", "JAWOPEN", "JAWFORWARD", "JAWLEFT", "JAWRIGHT", "MOUTHFUNNEL", "MOUTHPUCKER", "MOUTHLEFT", "MOUTHRIGHT", "MOUTHROLLUPPER", "MOUTHROLLLOWER", "MOUTHSHRUGUPPER", "MOUTHSHRUGLOWER", "MOUTHCLOSE", "MOUTHSMILELEFT", "MOUTHSMILERIGHT", "MOUTHFROWNLEFT", "MOUTHFROWNRIGHT", "MOUTHDIMPLELEFT", "MOUTHDIMPLERIGHT", "MOUTHUPPERUPLEFT", "MOUTHUPPERUPRIGHT", "MOUTHLOWERDOWNLEFT", "MOUTHLOWERDOWNRIGHT", "MOUTHPRESSLEFT", "MOUTHPRESSRIGHT", "MOUTHSTRETCHLEFT", "MOUTHSTRETCHRIGHT", "TONGUEOUT", "CHEEKSQUITLEFT", "CHEEKSQUINTRIGHT" };
+        private HashSet<string> eyesBlendShapes = new HashSet<string>() { "BLINK", "BLINK_L", "BLINK_R", "EYELOOKUPLEFT", "EYELOOKUPRIGHT", "EYELOOKDOWNLEFT", "EYELOOKDOWNRIGHT", "EYELOOKINLEFT", "EYELOOKINRIGHT", "EYELOOKOUTLEFT", "EYELOOKOUTRIGHT", "EYEBLINKLEFT", "EYEBLINKRIGHT", "EYESQUINTRIGHT", "EYESQUINTLEFT", "EYEWIDELEFT", "EYEWIDERIGHT", "NOSESNEERLEFT", "NOSESNEERRIGHT", "CHEEKSQUINTLEFT", "CHEEKSQUINTRIGHT" };
+        private HashSet<string> mouthBlendShapes = new HashSet<string>() { "A", "I", "U", "E", "O", "SIL", "CH", "DD", "FF", "KK", "NN", "PP", "RR", "SS", "TH", "JAWOPEN", "JAWFORWARD", "JAWLEFT", "JAWRIGHT", "MOUTHFUNNEL", "MOUTHPUCKER", "MOUTHLEFT", "MOUTHRIGHT", "MOUTHROLLUPPER", "MOUTHROLLLOWER", "MOUTHSHRUGUPPER", "MOUTHSHRUGLOWER", "MOUTHCLOSE", "MOUTHSMILELEFT", "MOUTHSMILERIGHT", "MOUTHFROWNLEFT", "MOUTHFROWNRIGHT", "MOUTHDIMPLELEFT", "MOUTHDIMPLERIGHT", "MOUTHUPPERUPLEFT", "MOUTHUPPERUPRIGHT", "MOUTHLOWERDOWNLEFT", "MOUTHLOWERDOWNRIGHT", "MOUTHPRESSLEFT", "MOUTHPRESSRIGHT", "MOUTHSTRETCHLEFT", "MOUTHSTRETCHRIGHT", "TONGUEOUT", "CHEEKSQUINTLEFT", "CHEEKSQUINTRIGHT" };
         private bool clearPSBrows = false;
         private bool clearPSEyes = false;
         private bool clearPSMouth = false;
         private Dictionary<BlendShapeKey, float> clearKeys = new Dictionary<BlendShapeKey, float>();
         
         private bool perfectSync = false;
+        private HashSet<string> visemeBlendShapes = new HashSet<string>() { "A", "I", "U", "E", "O", "SIL", "CH", "DD", "FF", "KK", "NN", "PP", "RR", "SS", "TH" };
+        private string[] perfectSyncNames = new string[] { "BROWINNERUP", "BROWDOWNLEFT", "BROWDOWNRIGHT", "BROWOUTERUPLEFT", "BROWOUTERUPRIGHT", "EYELOOKUPLEFT", "EYELOOKUPRIGHT", "EYELOOKDOWNLEFT", "EYELOOKDOWNRIGHT", "EYELOOKINLEFT", "EYELOOKINRIGHT", "EYELOOKOUTLEFT", "EYELOOKOUTRIGHT", "EYEBLINKLEFT", "EYEBLINKRIGHT", "EYESQUINTRIGHT", "EYESQUINTLEFT", "EYEWIDELEFT", "EYEWIDERIGHT", "CHEEKPUFF", "CHEEKSQUINTLEFT", "CHEEKSQUINTRIGHT", "NOSESNEERLEFT", "NOSESNEERRIGHT", "JAWOPEN", "JAWFORWARD", "JAWLEFT", "JAWRIGHT", "MOUTHFUNNEL", "MOUTHPUCKER", "MOUTHLEFT", "MOUTHRIGHT", "MOUTHROLLUPPER", "MOUTHROLLLOWER", "MOUTHSHRUGUPPER", "MOUTHSHRUGLOWER", "MOUTHCLOSE", "MOUTHSMILELEFT", "MOUTHSMILERIGHT", "MOUTHFROWNLEFT", "MOUTHFROWNRIGHT", "MOUTHDIMPLELEFT", "MOUTHDIMPLERIGHT", "MOUTHUPPERUPLEFT", "MOUTHUPPERUPRIGHT", "MOUTHLOWERDOWNLEFT", "MOUTHLOWERDOWNRIGHT", "MOUTHPRESSLEFT", "MOUTHPRESSRIGHT", "MOUTHSTRETCHLEFT", "MOUTHSTRETCHRIGHT", "TONGUEOUT" };
+        private InterpolatedMap<string, InterpolatedFloat, float> perfectSyncMap = new InterpolatedMap<string, InterpolatedFloat, float>();
         private Dictionary<string, BlendShapeKey> clipMap = new Dictionary<string, BlendShapeKey>();
 
         private VRMBlendShapeProxy proxy = null;
         private Animator animator = null;
         private RuntimeAnimatorController animatorController = null;
+        private Dictionary<BlendShapeKey, float> clearMap = new Dictionary<BlendShapeKey, float>();
         private Dictionary<BlendShapeKey, float> values = new Dictionary<BlendShapeKey, float>();
+        private Dictionary<BlendShapeKey, string> clipNames = new Dictionary<BlendShapeKey, string>();
         private Dictionary<string, Tuple<string, AnimatorControllerParameterType>> parameters = new Dictionary<string, Tuple<string, AnimatorControllerParameterType>>();
-        private bool skip = false;
-        private float globalWeight = 1f;
+        private bool interpolatedPerfectSync = false;
+        private float defaultWeight = 1f;
+        private OpenSeeVRMDriver vrmDriver = null;
+        
+        public OpenSeeBlendShapeProxy(OpenSeeVRMDriver vrmDriver) {
+            this.vrmDriver = vrmDriver;
+        }
+        
+        void InterpolatePerfectSync() {
+            if (!HasPerfectSync() || interpolatedPerfectSync)
+                return;
+            foreach (var name in perfectSyncNames) {
+                if (!perfectSyncMap.Check(name))
+                    continue;
+                float weight = perfectSyncMap.Get(name);
+                AccumulateValue(name, weight, 1f);
+            }
+            interpolatedPerfectSync = true;
+        }
+        
+        public void ClearPerfectSync() {
+            perfectSyncMap.Clear();
+        }
+        
+        public void SetPerfectSync(string name, float weight, double nowT, float factor) {
+            perfectSyncMap.Store(name.ToUpper(), Mathf.Clamp(weight * factor, 0f, 1f), nowT);
+        }
+
+        public void SetPerfectSync(string name, float weight, double nowT) {
+            SetPerfectSync(name, weight, nowT, defaultWeight);
+        }
         
         public bool HasPerfectSync() {
             if (proxy == null || animator == null)
@@ -315,7 +358,7 @@ public class OpenSeeVRMDriver : MonoBehaviour {
         }
         
         public void SetWeight(float v) {
-            globalWeight = v;
+            defaultWeight = v;
         }
         
         public void DisableFaceParts(bool brows, bool eyes, bool mouth) {
@@ -325,8 +368,14 @@ public class OpenSeeVRMDriver : MonoBehaviour {
         }
         
         private void SetFloat(BlendShapeKey key, float weight) {
-            string name = key.Name.ToUpper();
-            weight *= globalWeight;
+            SetFloat(key, weight, defaultWeight);
+        }
+        
+        private void SetFloat(BlendShapeKey key, float weight, float factor) {
+            if (!clipNames.ContainsKey(key))
+                return;
+            string name = clipNames[key];
+            weight *= factor;
             if (animator != null && parameters.ContainsKey(name)) {
                 var parameter = parameters[name];
                 if (parameter.Item2 == AnimatorControllerParameterType.Float)
@@ -351,72 +400,92 @@ public class OpenSeeVRMDriver : MonoBehaviour {
                 }
             }
         }
-        
-        public void SetSkip(bool skip) {
-            this.skip = skip;
-        }
 
         public void Clear() {
             CheckAnimatorController();
-            if (proxy != null && !skip) {
+            interpolatedPerfectSync = false;
+            if (proxy != null) {
                 foreach (var pair in proxy.GetValues()) {
-                    proxy.ImmediatelySetValue(pair.Key, 0f);
                     SetFloat(pair.Key, 0f);
                 }
                 foreach (var pair in values) {
-                    proxy.ImmediatelySetValue(pair.Key, 0f);
                     SetFloat(pair.Key, 0f);
                 }
+                proxy.SetValues(clearMap);
             }
             values.Clear();
         }
         
+        void NormalizeVisemes() {
+            float total = 0f;
+            foreach (var pair in values) {
+                string name = pair.Key.Name.ToUpper();
+                if (visemeBlendShapes.Contains(name))
+                    total += pair.Value;
+            }
+            if (total > 1f) {
+                var keys = new List<BlendShapeKey>(values.Keys);
+                foreach (var key in keys) {
+                    string name = key.Name.ToUpper();
+                    if (visemeBlendShapes.Contains(name))
+                        values[key] = values[key] / total;
+                }
+            }
+        }
+        
         public void Apply() {
-            if (skip || proxy == null)
+            if (proxy == null)
                 return;
             CheckAnimatorController();
+            if (perfectSync)
+                InterpolatePerfectSync();
+            if (vrmDriver != null && vrmDriver.visemeNormalization)
+                NormalizeVisemes();
             if (clearPSBrows || clearPSEyes || clearPSMouth) {
-                bool found = false;
                 clearKeys.Clear();
                 foreach (var pair in proxy.GetValues()) {
                     string name = pair.Key.Name.ToUpper();
                     if (clearPSBrows && browsBlendShapes.Contains(name)) {
                         clearKeys[pair.Key] = 0f;
-                        found = true;
+                        values[pair.Key] = 0f;
                     } else if (clearPSEyes && eyesBlendShapes.Contains(name)) {
                         clearKeys[pair.Key] = 0f;
-                        found = true;
+                        values[pair.Key] = 0f;
                     } else if (clearPSMouth && mouthBlendShapes.Contains(name)) {
                         clearKeys[pair.Key] = 0f;
-                        found = true;
+                        values[pair.Key] = 0f;
                     }
                 }
-                if (found)
-                    proxy.SetValues(clearKeys);
                 clearPSBrows = false;
                 clearPSEyes = false;
                 clearPSMouth = false;
             }
+            proxy.SetValues(values);
             foreach (var pair in values) {
-                proxy.AccumulateValue(pair.Key, pair.Value * globalWeight);
-                SetFloat(pair.Key, pair.Value);
+                SetFloat(pair.Key, pair.Value, 1f);
             }
             proxy.Apply();
         }
 
-        public void AccumulateValue(BlendShapeKey key, float weight) {
-            if (skip)
-                return;
+        public void AccumulateValue(BlendShapeKey key, float weight, float factor) {
             if (!values.ContainsKey(key))
-                values.Add(key, weight);
+                values.Add(key, weight * factor);
             else
-                values[key] = Mathf.Max(values[key], weight);
+                values[key] = Mathf.Max(values[key], weight * factor);
+        }
+
+        public void AccumulateValue(BlendShapeKey key, float weight) {
+            AccumulateValue(key, weight, defaultWeight);
+        }
+        
+        public void AccumulateValue(string key, float weight, float factor) {
+            if (!clipMap.ContainsKey(key.ToUpper()))
+                return;
+            AccumulateValue(clipMap[key.ToUpper()], weight, factor);
         }
         
         public void AccumulateValue(string key, float weight) {
-            if (!clipMap.ContainsKey(key.ToUpper()))
-                return;
-            AccumulateValue(clipMap[key.ToUpper()], weight);
+            AccumulateValue(key, weight, defaultWeight);
         }
 
         public void UpdateAvatar(VRMBlendShapeProxy vrmBlendShapeProxy, Animator animator) {
@@ -426,18 +495,28 @@ public class OpenSeeVRMDriver : MonoBehaviour {
             perfectSync = false;
             if (proxy == null)
                 return;
-            HashSet<string> perfectSyncNames = new HashSet<string>() { "BROWINNERUP", "BROWDOWNLEFT", "BROWDOWNRIGHT", "BROWOUTERUPLEFT", "BROWOUTERUPRIGHT", "EYELOOKUPLEFT", "EYELOOKUPRIGHT", "EYELOOKDOWNLEFT", "EYELOOKDOWNRIGHT", "EYELOOKINLEFT", "EYELOOKINRIGHT", "EYELOOKOUTLEFT", "EYELOOKOUTRIGHT", "EYEBLINKLEFT", "EYEBLINKRIGHT", "EYESQUINTRIGHT", "EYESQUINTLEFT", "EYEWIDELEFT", "EYEWIDERIGHT", "CHEEKPUFF", "CHEEKSQUINTLEFT", "CHEEKSQUINTRIGHT", "NOSESNEERLEFT", "NOSESNEERRIGHT", "JAWOPEN", "JAWFORWARD", "JAWLEFT", "JAWRIGHT", "MOUTHFUNNEL", "MOUTHPUCKER", "MOUTHLEFT", "MOUTHRIGHT", "MOUTHROLLUPPER", "MOUTHROLLLOWER", "MOUTHSHRUGUPPER", "MOUTHSHRUGLOWER", "MOUTHCLOSE", "MOUTHSMILELEFT", "MOUTHSMILERIGHT", "MOUTHFROWNLEFT", "MOUTHFROWNRIGHT", "MOUTHDIMPLELEFT", "MOUTHDIMPLERIGHT", "MOUTHUPPERUPLEFT", "MOUTHUPPERUPRIGHT", "MOUTHLOWERDOWNLEFT", "MOUTHLOWERDOWNRIGHT", "MOUTHPRESSLEFT", "MOUTHPRESSRIGHT", "MOUTHSTRETCHLEFT", "MOUTHSTRETCHRIGHT", "TONGUEOUT" };
+            HashSet<string> perfectSyncSet = new HashSet<string>(perfectSyncNames);
             clipMap.Clear();
+            clipNames.Clear();
+            clearMap.Clear();
+            perfectSyncMap.Clear();
+            //perfectSyncMap.SetSmoothing(0.5f);
             foreach (BlendShapeClip clip in vrmBlendShapeProxy.BlendShapeAvatar.Clips) {
                 if (clip.Preset == BlendShapePreset.Unknown && clip.BlendShapeName != null) {
                     string name = clip.BlendShapeName.ToUpper();
                     clipMap.Add(name, BlendShapeKey.CreateUnknown(clip.BlendShapeName));
-                    if (perfectSyncNames.Contains(name)) {
-                        perfectSyncNames.Remove(name);
+                    clipNames.Add(BlendShapeKey.CreateUnknown(clip.BlendShapeName), name);
+                    clearMap.Add(BlendShapeKey.CreateUnknown(clip.BlendShapeName), 0f);
+                    if (perfectSyncSet.Contains(name)) {
+                        perfectSyncSet.Remove(name);
                     }
+                } else if (clip.Preset != BlendShapePreset.Unknown) {
+                    string name = clip.BlendShapeName.ToUpper();
+                    clipNames.Add(BlendShapeKey.CreateFromPreset(clip.Preset), name);
+                    clearMap.Add(BlendShapeKey.CreateFromPreset(clip.Preset), 0f);
                 }
             }
-            if (perfectSyncNames.Count < 1)
+            if (perfectSyncSet.Count < 1)
                 perfectSync = true;
         }
     }
@@ -527,9 +606,10 @@ public class OpenSeeVRMDriver : MonoBehaviour {
         return bestViseme;
     }
     #endif
-
+    
     bool ApplyVisemes() {
         #if WINDOWS_BUILD
+        trackMouth = false;
         if (vrmBlendShapeProxy == null || catsData == null)
             return true;
         float expressionFactor = 1f;
@@ -583,9 +663,9 @@ public class OpenSeeVRMDriver : MonoBehaviour {
             float result = lastVisemeValues[i] * visemeFactor * expressionFactor;
             if (result > 0f && i < lastIdx) {
                 if (haveFullVisemeSet)
-                    proxy.AccumulateValue(fullVisemePresets[i], result);
+                    proxy.AccumulateValue(fullVisemePresets[i], result, 1f);
                 else
-                    proxy.AccumulateValue(visemePresetMap[i], result);
+                    proxy.AccumulateValue(visemePresetMap[i], result, 1f);
             }
             if (i == lastIdx) {
                 if (animateJawBone)
@@ -599,7 +679,6 @@ public class OpenSeeVRMDriver : MonoBehaviour {
     }
     
     void SetJaw(float v) {
-        v *= blendShapeWeight;
         if (haveJawParameter) {
             animator.SetFloat("JawMovement", v);
             return;
@@ -639,6 +718,8 @@ public class OpenSeeVRMDriver : MonoBehaviour {
         if (currentExpression != null && !currentExpressionEnableVisemes)
             return;
         
+        trackMouth = !fadeOnly;
+        
         float expressionFactor = 1f;
         if (currentExpression != null)
             expressionFactor = currentExpressionVisemeFactor;
@@ -647,10 +728,11 @@ public class OpenSeeVRMDriver : MonoBehaviour {
             float interpolated = Mathf.Lerp(lastMouthStates[i], currentMouthStates[i], t);
             float result = interpolated * expressionFactor * visemeFactor;
             if (i < 5 && result > 0f)
-                proxy.AccumulateValue(visemePresetMap[i], result);
+                if (!useCameraPerfectSync || !proxy.HasPerfectSync())
+                    proxy.AccumulateValue(visemePresetMap[i], result);
             if (i == 5) {
                 if (animateJawBone)
-                    SetJaw(result * 0.99999f);
+                    SetJaw(result * 0.99999f * blendShapeWeight);
                 else
                     SetJaw(0f);
             }
@@ -726,6 +808,127 @@ public class OpenSeeVRMDriver : MonoBehaviour {
         ApplyMouthShape(false);
     }
     
+    void UpdatePerfectSync() {
+        if (openSeeData == null || lastPerfectSync >= openSeeData.time)
+            return;
+        lastPerfectSync = openSeeData.time;
+        if (useCameraPerfectSync && proxy.HasPerfectSync()) {
+            float upDownStrength = (openSeeData.features.EyebrowUpDownLeft + openSeeData.features.EyebrowUpDownRight) / 2f;
+            if (upDownStrength > 0f)
+                proxy.SetPerfectSync("BROWINNERUP", upDownStrength * 0.8f, lastPerfectSync);
+            else
+                proxy.SetPerfectSync("BROWINNERUP", 0, lastPerfectSync);
+
+            if (openSeeData.features.EyebrowUpDownLeft < 0.2f) {
+                proxy.SetPerfectSync("BROWDOWNLEFT", -openSeeData.features.EyebrowUpDownLeft * 0.5f, lastPerfectSync);
+                if (openSeeData.features.EyeLeft < 0.1f && openSeeData.features.EyeLeft > -0.6f) {
+                    proxy.SetPerfectSync("EYESQUINTLEFT", -openSeeData.features.EyeLeft, lastPerfectSync);
+                    proxy.SetPerfectSync("EYEBLINKLEFT", 0, lastPerfectSync);
+                } else if (openSeeData.features.EyeLeft <= -0.6f) {
+                    proxy.SetPerfectSync("EYEBLINKLEFT", -openSeeData.features.EyeLeft * 1.5f, lastPerfectSync);
+                    proxy.SetPerfectSync("EYESQUINTLEFT", 0, lastPerfectSync);
+                } else {
+                    proxy.SetPerfectSync("EYESQUINTLEFT", 0, lastPerfectSync);
+                    proxy.SetPerfectSync("EYEBLINKLEFT", 0, lastPerfectSync);
+                }
+            } else {
+                proxy.SetPerfectSync("BROWDOWNLEFT", 0, lastPerfectSync);
+                proxy.SetPerfectSync("EYESQUINTLEFT", 0, lastPerfectSync);
+                if (openSeeData.features.EyeLeft <= -0.3f)
+                    proxy.SetPerfectSync("EYEBLINKLEFT", -openSeeData.features.EyeLeft * 1.5f, lastPerfectSync);
+                else
+                    proxy.SetPerfectSync("EYEBLINKLEFT", 0, lastPerfectSync);
+            }
+            
+            if (openSeeData.features.EyebrowUpDownRight < 0.2f) {
+                proxy.SetPerfectSync("BROWDOWNRIGHT", -openSeeData.features.EyebrowUpDownRight * 0.5f, lastPerfectSync);
+                if (openSeeData.features.EyeRight < 0.1f && openSeeData.features.EyeRight > -0.6f) {
+                    proxy.SetPerfectSync("EYESQUINTRIGHT", -openSeeData.features.EyeRight, lastPerfectSync);
+                    proxy.SetPerfectSync("EYEBLINKRIGHT", 0, lastPerfectSync);
+                } else if (openSeeData.features.EyeRight <= -0.6f) {
+                    proxy.SetPerfectSync("EYEBLINKRIGHT", -openSeeData.features.EyeRight * 1.5f, lastPerfectSync);
+                    proxy.SetPerfectSync("EYESQUINTRIGHT", 0, lastPerfectSync);
+                } else {
+                    proxy.SetPerfectSync("EYESQUINTRIGHT", 0, lastPerfectSync);
+                    proxy.SetPerfectSync("EYEBLINKRIGHT", 0, lastPerfectSync);
+                }
+            } else {
+                proxy.SetPerfectSync("BROWDOWNRIGHT", 0, lastPerfectSync);
+                proxy.SetPerfectSync("EYESQUINTRIGHT", 0, lastPerfectSync);
+                if (openSeeData.features.EyeRight <= -0.3f)
+                    proxy.SetPerfectSync("EYEBLINKRIGHT", -openSeeData.features.EyeRight * 1.5f, lastPerfectSync);
+                else
+                    proxy.SetPerfectSync("EYEBLINKRIGHT", 0, lastPerfectSync);
+            }
+
+            if (openSeeData.features.EyebrowSteepnessLeft < 0.2f)
+                proxy.SetPerfectSync("BROWOUTERUPLEFT", -openSeeData.features.EyebrowSteepnessLeft, lastPerfectSync);
+            else
+                proxy.SetPerfectSync("BROWOUTERUPLEFT", 0, lastPerfectSync);
+            
+            if (openSeeData.features.EyebrowSteepnessRight < 0.2f)
+                proxy.SetPerfectSync("BROWOUTERUPRIGHT", -openSeeData.features.EyebrowSteepnessRight, lastPerfectSync);
+            else
+                proxy.SetPerfectSync("BROWOUTERUPRIGHT", 0, lastPerfectSync);
+
+            if (openSeeData.features.EyeLeft > 0.5f)
+                proxy.SetPerfectSync("EYEWIDELEFT", openSeeData.features.EyeLeft * 0.7f, lastPerfectSync);
+            else
+                proxy.SetPerfectSync("EYEWIDELEFT", 0, lastPerfectSync);
+            
+            if (openSeeData.features.EyeRight > 0.5f)
+                proxy.SetPerfectSync("EYEWIDERIGHT", openSeeData.features.EyeRight * 0.7f, lastPerfectSync);
+            else
+                proxy.SetPerfectSync("EYEWIDERIGHT", 0, lastPerfectSync);
+            
+            if (trackMouth) {
+                if (openSeeData.features.MouthWide < 0.5f)
+                    proxy.SetPerfectSync("MOUTHPUCKER", -openSeeData.features.MouthWide * 0.3f, lastPerfectSync);
+                else
+                    proxy.SetPerfectSync("MOUTHPUCKER", 0, lastPerfectSync);
+                
+                if (openSeeData.features.MouthOpen > 0.0f) {
+                    proxy.SetPerfectSync("JAWOPEN", openSeeData.features.MouthOpen, lastPerfectSync);
+                    proxy.SetPerfectSync("MOUTHCLOSE", 0, lastPerfectSync);
+                } else if (openSeeData.features.MouthOpen < -0.0f) {
+                    proxy.SetPerfectSync("MOUTHCLOSE", openSeeData.features.MouthOpen, lastPerfectSync);
+                    proxy.SetPerfectSync("JAWOPEN", 0, lastPerfectSync);
+                } else {
+                    proxy.SetPerfectSync("JAWOPEN", 0, lastPerfectSync);
+                    proxy.SetPerfectSync("MOUTHCLOSE", 0, lastPerfectSync);
+                }
+                
+                if (openSeeData.features.MouthCornerInOutLeft > 0.3f)
+                    proxy.SetPerfectSync("MOUTHLEFT", openSeeData.features.MouthCornerInOutLeft * 0.5f, lastPerfectSync);
+                else
+                    proxy.SetPerfectSync("MOUTHLEFT", 0, lastPerfectSync);
+
+                if (openSeeData.features.MouthCornerInOutRight > 0.3f)
+                    proxy.SetPerfectSync("MOUTHRIGHT", openSeeData.features.MouthCornerInOutRight * 0.5f, lastPerfectSync);
+                else
+                    proxy.SetPerfectSync("MOUTHRIGHT", 0, lastPerfectSync);
+
+                if (openSeeData.features.MouthCornerUpDownLeft > 0.3f)
+                    proxy.SetPerfectSync("MOUTHSMILELEFT", openSeeData.features.MouthCornerUpDownLeft * 0.5f, lastPerfectSync);
+                else if (openSeeData.features.MouthCornerUpDownLeft < -0.3f)
+                    proxy.SetPerfectSync("MOUTHFROWNLEFT", -openSeeData.features.MouthCornerUpDownLeft, lastPerfectSync);
+                else {
+                    proxy.SetPerfectSync("MOUTHSMILELEFT", 0, lastPerfectSync);
+                    proxy.SetPerfectSync("MOUTHFROWNLEFT", 0, lastPerfectSync);
+                }
+
+                if (openSeeData.features.MouthCornerUpDownRight > 0.3f)
+                    proxy.SetPerfectSync("MOUTHSMILERIGHT", openSeeData.features.MouthCornerUpDownRight * 0.5f, lastPerfectSync);
+                else if (openSeeData.features.MouthCornerUpDownLeft < -0.3f)
+                    proxy.SetPerfectSync("MOUTHFROWNRIGHT", -openSeeData.features.MouthCornerUpDownRight, lastPerfectSync);
+                else {
+                    proxy.SetPerfectSync("MOUTHSMILERIGHT", 0, lastPerfectSync);
+                    proxy.SetPerfectSync("MOUTHFROWNRIGHT", 0, lastPerfectSync);
+                }
+            }
+        }
+    }
+    
     void UpdateBrows() {
         if ((browClips == null && (faceMesh == null || faceType < 0)) || openSeeData == null) {
             return;
@@ -738,21 +941,23 @@ public class OpenSeeVRMDriver : MonoBehaviour {
         if (currentExpression != null)
             strength *= currentExpressionEyebrowWeight;
         
-        if (!skipApply && browClips == null) {
-            if (browUpIndex > -1 && strength > 0f)
-                faceMesh.SetBlendShapeWeight(browUpIndex, strength * Mathf.Lerp(lastBrowStates[0], currentBrowStates[0], t));
-            if (browDownIndex > -1 && strength > 0f)
-                faceMesh.SetBlendShapeWeight(browDownIndex, strength * Mathf.Lerp(lastBrowStates[1], currentBrowStates[1], t));
-            if (browAngryIndex > -1 && strength > 0f)
-                faceMesh.SetBlendShapeWeight(browAngryIndex, strength * Mathf.Lerp(lastBrowStates[2], currentBrowStates[2], t));
-            if (browSorrowIndex > -1 && strength > 0f)
-                faceMesh.SetBlendShapeWeight(browSorrowIndex, strength * Mathf.Lerp(lastBrowStates[3], currentBrowStates[3], t));
-        }
-        if (browClips != null && strength > 0f) {
-            if (lastBrowUpDown > 0f)
-                proxy.AccumulateValue(browClips[0], strength * Mathf.Lerp(lastBrowStates[0], currentBrowStates[0], t));
-            else if (lastBrowUpDown < 0f)
-                proxy.AccumulateValue(browClips[1], strength * Mathf.Lerp(lastBrowStates[1], currentBrowStates[1], t));
+        if (!useCameraPerfectSync || !proxy.HasPerfectSync()) {
+            if (!skipApply && browClips == null) {
+                if (browUpIndex > -1 && strength > 0f)
+                    faceMesh.SetBlendShapeWeight(browUpIndex, strength * Mathf.Lerp(lastBrowStates[0], currentBrowStates[0], t));
+                if (browDownIndex > -1 && strength > 0f)
+                    faceMesh.SetBlendShapeWeight(browDownIndex, strength * Mathf.Lerp(lastBrowStates[1], currentBrowStates[1], t));
+                if (browAngryIndex > -1 && strength > 0f)
+                    faceMesh.SetBlendShapeWeight(browAngryIndex, strength * Mathf.Lerp(lastBrowStates[2], currentBrowStates[2], t));
+                if (browSorrowIndex > -1 && strength > 0f)
+                    faceMesh.SetBlendShapeWeight(browSorrowIndex, strength * Mathf.Lerp(lastBrowStates[3], currentBrowStates[3], t));
+            }
+            if (browClips != null && strength > 0f) {
+                if (lastBrowUpDown > 0f)
+                    proxy.AccumulateValue(browClips[0], strength * Mathf.Lerp(lastBrowStates[0], currentBrowStates[0], t));
+                else if (lastBrowUpDown < 0f)
+                    proxy.AccumulateValue(browClips[1], strength * Mathf.Lerp(lastBrowStates[1], currentBrowStates[1], t));
+            }
         }
 
         if (lastBrows < openSeeData.time) {
@@ -1242,7 +1447,7 @@ public class OpenSeeVRMDriver : MonoBehaviour {
         foreach (var expression in expressionMap.Values) {
             float weight = expression.GetWeight(baseTransitionTime);
             if (weight > 0f) {
-                proxy.AccumulateValue(expression.blendShapeKey, weight);
+                proxy.AccumulateValue(expression.blendShapeKey, weight, 1f);
                 
                 // Accumulate limits on expressions
                 currentExpressionEnableBlinking = currentExpressionEnableBlinking && expression.enableBlinking;
@@ -1280,7 +1485,7 @@ public class OpenSeeVRMDriver : MonoBehaviour {
     }
     
     void UpdateGaze() {
-        if (openSeeData == null || vrmBlendShapeProxy == null || openSeeIKTarget == null)
+        if (openSeeData == null || vrmBlendShapeProxy == null || openSeeIKTarget == null || skipApplyEyes)
             return;
         
         float lookUpDown = currentLookUpDown;
@@ -1348,7 +1553,8 @@ public class OpenSeeVRMDriver : MonoBehaviour {
         if (autoBlink || only30Points) {
             if (currentExpressionEnableBlinking) {
                 float blink = eyeBlinker.Blink();
-                proxy.AccumulateValue(BlendShapeKey.CreateFromPreset(BlendShapePreset.Blink), blink);
+                if (!useCameraPerfectSync || ! proxy.HasPerfectSync())
+                    proxy.AccumulateValue(BlendShapeKey.CreateFromPreset(BlendShapePreset.Blink), blink, 1);
             }
         } else if (openSeeExpression != null && openSeeExpression.openSee != null && openSeeData != null) {
             if (!currentExpressionEnableBlinking)
@@ -1366,7 +1572,8 @@ public class OpenSeeVRMDriver : MonoBehaviour {
                 if (!(wasLookingDown > 0f))
                     eyeBlinker.Blink();
                 float blink = eyeBlinker.Blink();
-                proxy.AccumulateValue(BlendShapeKey.CreateFromPreset(BlendShapePreset.Blink), blink);
+                if (!useCameraPerfectSync || ! proxy.HasPerfectSync())
+                    proxy.AccumulateValue(BlendShapeKey.CreateFromPreset(BlendShapePreset.Blink), blink);
                 return;
             }
 
@@ -1383,12 +1590,14 @@ public class OpenSeeVRMDriver : MonoBehaviour {
                 right = tmp;
             }
             
-            if (linkBlinks && !allowWinking) {
-                float v = Mathf.Max(left, right);
-                proxy.AccumulateValue(BlendShapeKey.CreateFromPreset(BlendShapePreset.Blink), v);
-            } else {
-                proxy.AccumulateValue(BlendShapeKey.CreateFromPreset(BlendShapePreset.Blink_R), right);
-                proxy.AccumulateValue(BlendShapeKey.CreateFromPreset(BlendShapePreset.Blink_L), left);
+            if (!useCameraPerfectSync || !proxy.HasPerfectSync()) {
+                if (linkBlinks && !allowWinking) {
+                    float v = Mathf.Max(left, right);
+                    proxy.AccumulateValue(BlendShapeKey.CreateFromPreset(BlendShapePreset.Blink), v);
+                } else {
+                    proxy.AccumulateValue(BlendShapeKey.CreateFromPreset(BlendShapePreset.Blink_R), right);
+                    proxy.AccumulateValue(BlendShapeKey.CreateFromPreset(BlendShapePreset.Blink_L), left);
+                }
             }
 
             if (openSeeData != null && lastBlink < openSeeData.time) {
@@ -1432,8 +1641,10 @@ public class OpenSeeVRMDriver : MonoBehaviour {
                     right = left;
                 
                 if (linkBlinks) {
-                    if (Mathf.Abs(right - left) < 0.95 || !allowWinking) {
+                    if (Mathf.Abs(right - left) < smartWinkThreshold || !allowWinking) {
                         float v = Mathf.Max(left, right);
+                        if (v < 0.3f)
+                            v = Mathf.Min(left, right);
                         left = v;
                         right = v;
                     }
@@ -1743,9 +1954,25 @@ public class OpenSeeVRMDriver : MonoBehaviour {
 
     void Start() {
         InitExpressionMap();
+        proxy = new OpenSeeBlendShapeProxy(this);
         humanBodyBones = (HumanBodyBones[])Enum.GetValues(typeof(HumanBodyBones));
         humanBodyBoneTransforms = new Transform[humanBodyBones.Length];
         humanBodyBoneRotations = new Quaternion[humanBodyBones.Length];
+    }
+    
+    public void SetProxyValues(Dictionary<BlendShapeKey, float> dict) {
+        foreach (var kv in dict) {
+            proxy.AccumulateValue(kv.Key, kv.Value, 1f);
+        }
+    }
+    
+    public void SetExternalPerfectSync(Dictionary<string, float> blendshapes, float time) {
+        if (blendshapes == null) {
+            proxy.ClearPerfectSync();
+            return;
+        }
+        foreach (var entry in blendshapes)
+            proxy.SetPerfectSync(entry.Key, entry.Value, time, 1f);
     }
 
     void RunUpdates() {
@@ -1758,46 +1985,45 @@ public class OpenSeeVRMDriver : MonoBehaviour {
             InitializeLipSync();
             initializeLipSync = false;
         }
-        proxy.SetSkip(skipApply);
         proxy.SetWeight(blendShapeWeight);
         proxy.Clear();
         FindFaceMesh();
         if (!skipApply)
             UpdateExpression();
-        BlinkEyes();
+        if (!skipApply)
+            BlinkEyes();
+        bool doMouthTracking = true;
         #if WINDOWS_BUILD
         ReadAudio();
-        bool doMouthTracking = true;
         if (lipSync) {
-            doMouthTracking = ApplyVisemes();
+            if (!skipApply)
+                doMouthTracking = ApplyVisemes();
         }
-        #else
-        bool doMouthTracking = true;
         #endif
-        if (doMouthTracking)
+        if (doMouthTracking && !skipApply)
             ApplyMouthShape();
-        if (vrmBlendShapeProxy != null && browClips == null)
+        if (!skipApply)
+            UpdatePerfectSync();
+        if (!skipApply && vrmBlendShapeProxy != null && browClips == null)
             proxy.Apply();
-        UpdateBrows();
-        if (vrmBlendShapeProxy != null && browClips != null)
+        if (!skipApply)
+            UpdateBrows();
+        if (!skipApply && vrmBlendShapeProxy != null && browClips != null)
             proxy.Apply();
     }
     
     void LateUpdate() {
-        if (!skipApplyEyes && gazeTracking && !only30Points) {
-            UpdateGaze();
-            proxy.Apply();
-        }
         if (!skipApplyJaw && jawBone != null && jawBoneAnimation != null && !haveJawParameter) {
             jawBone.localRotation = jawRotation;
         }
+        if (!skipApplyEyes && gazeTracking && !only30Points) {
+            UpdateGaze();
+        }
         // If blendshapes are received over VMC, apply expressions afterwards if they should be applied
         if (skipApply && stillApplyExpressions) {
-            proxy.SetSkip(false);
             UpdateExpression();
-            proxy.Apply();
-            proxy.SetSkip(skipApply);
         }
+        proxy.Apply();
     }
     
     void FixedUpdate() {
@@ -1840,4 +2066,17 @@ public class OpenSeeVRMDriver : MonoBehaviour {
     public void SetAnimateJawBone(bool value) {
         animateJawBone = value;
     }
+    
+    public void SetSmartWinkThreshold(float v) {
+        smartWinkThreshold = v;
+    }
+
+    public void SetGazeSmoothing(float v) {
+        gazeSmoothing = v;
+    }
+
+    public void SetVisemeNormalization(bool v) {
+        visemeNormalization = v;
+    }
+
 }

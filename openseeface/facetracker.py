@@ -46,6 +46,7 @@ class Facetracker(object):
             parser.add_argument("-H", "--height", type=int, help="Set raw RGB height", default=360)
 
         parser.add_argument("-c", "--capture", help="Set camera ID (0, 1...) or video file", default="0")
+        parser.add_argument("-M", "--mirror-input", action="store_true", help="Process a mirror image of the input video")
         parser.add_argument("-m", "--max-threads", type=int, help="Set the maximum number of threads", default=1)
         parser.add_argument("-t", "--threshold", type=float, help="Set minimum confidence threshold for face tracking", default=None)
         parser.add_argument("-d", "--detection-threshold", type=float, help="Set minimum confidence threshold for face detection", default=0.6)
@@ -292,6 +293,8 @@ class Facetracker(object):
                 continue
 
             ret, frame = input_reader.read()
+            if ret and self._args.mirror_input:
+                frame = cv2.flip(frame, 1)
             if not ret:
                 if repeat:
                     if need_reinit == 0:
