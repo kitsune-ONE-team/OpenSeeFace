@@ -73,7 +73,6 @@ class Facetracker(object):
         parser.add_argument("--repeat-video", type=int, help="When set to 1 and a video file was specified with -c, the tracker will loop the video until interrupted", default=0)
         parser.add_argument("--dump-points", type=str, help="When set to a filename, the current face 3D points are made symmetric and dumped to the given file when quitting the visualization with the \"q\" key", default="")
         parser.add_argument("--benchmark", type=int, help="When set to 1, the different tracking models are benchmarked, starting with the best and ending with the fastest and with gaze tracking disabled for models with negative IDs", default=0)
-        parser.add_argument("--mirror", action="store_true", required=False, help="Mirror the camera image")
         parser.add_argument("--limit-fps", type=int, help="Limit app's max frame rate")
         parser.add_argument("--protocol", type=int, help="Protocol version to use", default=1)
         parser.add_argument("--write-pid", type=str, help="Write process ID to file", required=False)
@@ -239,12 +238,12 @@ class Facetracker(object):
             fps = self._args.fps
             dcap = self._args.dcap
             use_dshowcapture_flag = True if self._args.use_dshowcapture == 1 else False
-            input_reader = InputReader(self._args.capture, self._args.raw_rgb, self._args.width, self._args.height, fps, use_dshowcapture=use_dshowcapture_flag, dcap=dcap, mirror=mirror)
+            input_reader = InputReader(self._args.capture, self._args.raw_rgb, self._args.width, self._args.height, fps, use_dshowcapture=use_dshowcapture_flag, dcap=dcap)
             if self._args.dcap == -1 and type(input_reader) == DShowCaptureReader:
                 fps = min(fps, input_reader.device.get_fps())
         else:
             fps = 0
-            input_reader = InputReader(self._args.capture, self._args.raw_rgb, self._args.width, self._args.height, fps, use_dshowcapture=use_dshowcapture_flag, mirror=self._args.mirror)
+            input_reader = InputReader(self._args.capture, self._args.raw_rgb, self._args.width, self._args.height, fps, use_dshowcapture=use_dshowcapture_flag)
         if type(input_reader.reader) == VideoReader:
             fps = 0
 
@@ -281,7 +280,7 @@ class Facetracker(object):
             time_ns = time.time_ns()
 
             if not input_reader.is_open() or need_reinit == 1:
-                input_reader = InputReader(self._args.capture, self._args.raw_rgb, self._args.width, self._args.height, fps, use_dshowcapture=use_dshowcapture_flag, dcap=dcap, mirror=self._args.mirror)
+                input_reader = InputReader(self._args.capture, self._args.raw_rgb, self._args.width, self._args.height, fps, use_dshowcapture=use_dshowcapture_flag, dcap=dcap)
                 if input_reader.name != source_name:
                     print(f"Failed to reinitialize camera and got {input_reader.name} instead of {source_name}.")
                     sys.exit(1)
@@ -488,7 +487,7 @@ class Facetracker(object):
                                 c = hand.classification[0]
 
                                 is_left = c.label == 'Right'  # mediapipe expects mirrored image
-                                if self._args.mirror:
+                                if self._args.mirror_input:
                                     is_left = not is_left
 
                                 hand_landmarks.append((is_left, []))
