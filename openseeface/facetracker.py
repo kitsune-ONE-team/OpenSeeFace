@@ -147,7 +147,7 @@ class Facetracker(object):
         sys.stderr = OutputLog(output_logfile, sys.stderr)
 
         if os.name == 'nt':
-            from . import dshowcapture
+            from .reader import dshowcapture
             if self._args.blackmagic == 1:
                 dshowcapture.set_bm_enabled(True)
             if not self._args.blackmagic_options is None:
@@ -205,7 +205,8 @@ class Facetracker(object):
         import json
 
         from . import const
-        from .input_reader import InputReader, VideoReader, DShowCaptureReader, try_int
+        from .reader import InputReader, VideoReader, DShowCaptureReader, try_int
+        from .reader import DShowCaptureReader
         from .tracker import Tracker, get_model_base_path
 
 
