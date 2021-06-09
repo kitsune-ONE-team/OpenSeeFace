@@ -14,6 +14,8 @@ import signal
 import sys
 import traceback
 
+from . import const
+
 
 class Facetracker(object):
     def __init__(self):
@@ -202,11 +204,8 @@ class Facetracker(object):
         import cv2
         import socket
         import struct
-        import json
 
-        from . import const
-        from .reader import InputReader, VideoReader, DShowCaptureReader, try_int
-        from .reader import DShowCaptureReader
+        from .reader import InputReader, VideoReader, try_int
         from .tracker import Tracker, get_model_base_path
 
 
@@ -236,6 +235,8 @@ class Facetracker(object):
         dcap = None
         use_dshowcapture_flag = False
         if os.name == 'nt':
+            from .reader import DShowCaptureReader
+
             fps = self._args.fps
             dcap = self._args.dcap
             use_dshowcapture_flag = True if self._args.use_dshowcapture == 1 else False

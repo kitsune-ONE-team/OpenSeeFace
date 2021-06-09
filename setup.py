@@ -28,11 +28,12 @@ if __name__ == "__main__":
         license='BSD-2-Clause License',
         packages=(
             'openseeface',
+            'openseeface.reader',
             'openseeface.models',
         ),
         include_package_data=True,
         install_requires=[
-            'opencv-python',
+            'opencv-contrib-python',
             'pillow',
             'numpy',
         ],

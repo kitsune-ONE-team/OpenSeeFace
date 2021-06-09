@@ -12,10 +12,12 @@ image = device.get_image()
 import os
 import platform
 import sys
-from ctypes import *
+from ctypes import Structure, POINTER, c_int
 from PIL import Image
 import numpy as np
 import cv2
+
+from . import VideoReader
 
 def resolve(name):
     f = os.path.join(os.path.dirname(__file__), name)
@@ -70,8 +72,10 @@ def init():
     lib.initCapture.restype = c_int
     lib.initCOM()
 
+
 def count_capture_devices():
     return lib.countCaptureDevices()
+
 
 def device_name(device):
     """
@@ -83,6 +87,7 @@ def device_name(device):
     lib.getCaptureDeviceName(device, namearry, 256)
     camearaname = namearry.value
     return camearaname
+
 
 def init_camera(device, width, height, fps):
     global devices
@@ -98,8 +103,10 @@ def init_camera(device, width, height, fps):
 def do_capture(device):
     lib.doCapture(device)
 
+
 def is_capture_done(device):
     return lib.isCaptureDone(device)
+
 
 def read(device, width, height, array):
     if is_capture_done(device):
@@ -109,6 +116,7 @@ def read(device, width, height, array):
         return img
     else:
         return None
+
 
 def get_image(device, width, height, array):
     lib.doCapture(device)
@@ -121,5 +129,36 @@ def get_image(device, width, height, array):
     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR);
     return img
 
+
 def deinit_camera(device):
     lib.deinitCapture(device)
+
+
+class EscapiReader(VideoReader):
+    def __init__(self, capture, width, height, fps):
+        self.device = None
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.device = capture
+        count_capture_devices()
+        self.name = str(device_name(self.device).decode('utf8'))
+        self.buffer = init_camera(self.device, self.width, self.height, self.fps)
+        do_capture(self.device)
+
+    def is_open(self):
+        return True
+
+    def is_ready(self):
+        return is_capture_done(self.device)
+
+    def read(self):
+        if is_capture_done(self.device):
+            image = read(self.device, self.width, self.height, self.buffer)
+            do_capture(self.device)
+            return True, image
+        else:
+            return False, None
+
+    def close(self):
+        deinit_camera(self.device)

@@ -2,10 +2,13 @@ import os
 import platform
 import sys
 import numpy as np
-from ctypes import *
+from ctypes import cdll, c_char, c_char_p, c_void_p, c_int, c_longlong, create_string_buffer
 from PIL import Image
 import cv2
 import json
+import gc
+
+from . import VideoReader
 
 def resolve(name):
     f = os.path.join(os.path.dirname(__file__), name)
@@ -16,18 +19,22 @@ bm_lib = None
 bm_options = None
 bm_enabled = False
 
+
 def set_bm_enabled(v):
     global bm_enabled
     bm_enabled = v
+
 
 def set_options(str):
     global bm_options
     bm_options = str
 
+
 def create_frame_buffer(width, height, factor):
     buffer = bytearray(width * height * 4 * factor)
     char_array = c_char * len(buffer)
     return char_array.from_buffer(buffer)
+
 
 class DShowCapture():
     def __init__(self):
@@ -118,7 +125,7 @@ class DShowCapture():
         for cam in self.info:
             cam["type"] = "DirectShow"
             cam["index"] = cam["id"]
-        
+
         # Blackmagic
         if bm_enabled:
             json_length = self.bm_lib.get_json_length();
@@ -301,6 +308,60 @@ class DShowCapture():
         self.real_size = None
         return ret
 
+
+class DShowCaptureReader(VideoReader):
+    def __init__(self, capture, width, height, fps, use_dshowcapture=True, dcap=None):
+        self.device = None
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.dcap = dcap;
+        self.device = DShowCapture()
+        self.device.get_devices()
+        info = self.device.get_info()
+        self.name = info[capture]['name']
+        if info[capture]['type'] == "Blackmagic":
+            self.name = "Blackmagic: " + self.name
+            if dcap is None or dcap < 0:
+                dcap = 0
+        ret = False
+        if dcap is None:
+            ret = self.device.capture_device(capture, self.width, self.height, self.fps)
+        else:
+            if dcap < 0:
+                ret = self.device.capture_device_default(capture)
+            else:
+                ret = self.device.capture_device_by_dcap(capture, dcap, self.width, self.height, self.fps)
+        if not ret:
+            raise Exception("Failed to start capture.")
+        self.width = self.device.width
+        self.height = self.device.height
+        self.fps = self.device.fps
+        print(f"Camera: \"{self.name}\" Capability ID: {dcap} Resolution: {self.device.width}x{self.device.height} Frame rate: {self.device.fps} Colorspace: {self.device.colorspace} Internal: {self.device.colorspace_internal} Flipped: {self.device.flipped}")
+        self.timeout = 1000
+
+    def is_open(self):
+        return self.device.capturing()
+
+    def is_ready(self):
+        return self.device.capturing()
+
+    def read(self):
+        img = None
+        try:
+            img = self.device.get_frame(self.timeout)
+        except:
+            gc.collect()
+            img = self.device.get_frame(self.timeout)
+        if img is None:
+            return False, None
+        else:
+            return True, img
+
+    def close(self):
+        self.device.destroy_capture()
+
+
 if __name__ == "__main__":
     cam = 0
     width = 1280
@@ -326,7 +387,7 @@ if __name__ == "__main__":
     height = cap.get_height()
     flipped = cap.get_flipped()
     print(f"Width: {width} Height: {height} FPS: {cap.get_fps()} Flipped: {flipped} Colorspace: {cap.get_colorspace()} Internal: {cap.get_colorspace_internal()}")
-    
+
     while True:
         img = cap.get_frame(1000)
         if not img is None:
